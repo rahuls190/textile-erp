@@ -387,6 +387,28 @@ tr.pick { cursor: pointer; } tr.pick:hover, tr.pick.on { background: var(--surfa
 .inl-f { display: inline-flex; gap: 4px; } .inl-f input { width: 100px; text-align: right; }
 .dline { padding: 8px 0; border-top: 1px solid var(--line); } .dline select { flex: 1 1 220px; min-width: 0; }
 @media (max-width: 860px) { .board { grid-template-columns: repeat(6, 200px); } }
+
+/* masters */
+section.card + section { margin-top: 14px; }
+.row > input, .row > select { width: auto; flex: 1 1 130px; min-width: 0; }
+.kvs .kv { justify-content: start; text-align: left; } .kvs .kv b { text-align: left; }
+.bad-t { color: var(--bad); } .warn-t { color: var(--warn); }
+.scroll { overflow-x: auto; max-width: 100%; }
+.tbars { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2px 24px; }
+.tbar { display: grid; grid-template-columns: minmax(110px, 190px) minmax(0, 1fr) auto; align-items: center; gap: 10px; text-align: left; padding: 5px 8px; border: 1px solid transparent; background: transparent; border-radius: 8px; }
+.tbar:hover, .tbar.on { background: var(--accent-soft); border-color: var(--line); }
+.tbar span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.tbar i { display: block; height: 10px; border-radius: 5px; background: var(--accent); opacity: .75; min-width: 4px; }
+.tbar b { font-size: 12px; font-variant-numeric: tabular-nums; }
+.kvs { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px 16px; margin: 10px 0; }
+.kvs .kv { display: grid; gap: 1px; } .kvs .kv span { font-size: 12px; color: var(--muted); } .kvs .kv b { font-weight: 500; overflow-wrap: anywhere; }
+.wf { list-style: none; margin: 10px 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; counter-reset: w; }
+.wf li { counter-increment: w; font-size: 12px; padding: 4px 10px 4px 8px; border-radius: 999px; background: var(--surface-2); color: var(--muted); border: 1px solid var(--line); }
+.wf li::before { content: counter(w) ' '; font-weight: 600; }
+.wf li.done { background: var(--ok-soft); color: var(--ok); border-color: transparent; } .wf li.now { background: var(--warn-soft); color: var(--warn); border-color: transparent; }
+button.sm { padding: 2px 8px; font-size: 12px; }
+form.form textarea, .form textarea { width: 100%; font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-2); color: var(--fg); }
+.note.bad-t ul { margin: 6px 0 0 18px; padding: 0; }
 </style>
 
 <div id="app"></div>

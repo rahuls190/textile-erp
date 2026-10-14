@@ -10,14 +10,14 @@ export const ROLES: Record<string, { description: string; perms: string[] }> = {
          perms: ['user.manage', 'user.view', 'access.assign', 'role.manage', 'site.provision', 'audit.view'] },
   MD: { description: 'Master-data steward / managing director',
         perms: ['org.create', 'org.edit', 'unit.create', 'item.create', 'item.edit', 'item.submit', 'item.view',
-                'partner.create', 'partner.submit', 'partner.view', 'inventory.view', 'po.view', 'hr.salary.propose', 'hr.salary.approve', 'escalation.raise', 'escalation.senior', 'escalation.view'] },
+                'partner.create', 'partner.submit', 'partner.view', 'partner.edit', 'mtype.manage', 'inventory.view', 'po.view', 'hr.salary.propose', 'hr.salary.approve', 'escalation.raise', 'escalation.senior', 'escalation.view'] },
   ENG: { description: 'Engineer / technical approver',
-         perms: ['item.create', 'item.edit', 'item.submit', 'item.approve', 'item.view', 'inventory.view'] },
+         perms: ['item.create', 'item.edit', 'item.submit', 'item.approve', 'item.deactivate', 'item.view', 'inventory.view', 'partner.view'] },
   BUY: { description: 'Buyer',
          perms: ['po.create', 'po.edit', 'po.submit', 'po.amend', 'po.view', 'partner.create', 'partner.submit',
-                 'partner.view', 'rate.propose', 'item.view', 'inventory.view', 'receipt.view'] },
+                 'partner.view', 'partner.edit', 'rate.propose', 'item.view', 'inventory.view', 'receipt.view'] },
   COM: { description: 'Commercial approver',
-         perms: ['po.approve~', 'po.release~', 'po.cancel~', 'po.view', 'partner.trade.approve', 'partner.view',
+         perms: ['po.approve~', 'po.release~', 'po.cancel~', 'po.view', 'partner.trade.approve', 'partner.view', 'partner.suspend',
                  'rate.approve', 'item.view'] },
   STO: { description: 'Storekeeper',
          perms: ['receipt.post', 'receipt.view', 'putaway.execute', 'reservation.allocate', 'inventory.view',
@@ -48,7 +48,7 @@ export const ROLES: Record<string, { description: string; perms: string[] }> = {
                  'inventory.view', 'po.view', 'item.view', 'partner.view', 'receipt.view', 'qc.view',
                  'hr.employee.view', 'hr.attendance.view', 'hr.leave.view', 'hr.payroll.view', 'hr.salary.view', 'crm.view', 'sales.view', 'so.view'] },
   SAL: { description: 'Sales executive',
-         perms: ['crm.view', 'crm.manage', 'sales.view', 'partner.create', 'partner.submit', 'partner.view', 'quote.create', 'quote.send', 'so.create', 'so.submit', 'so.view', 'item.view', 'inventory.view'] },
+         perms: ['crm.view', 'crm.manage', 'sales.view', 'partner.create', 'partner.submit', 'partner.view', 'partner.edit', 'quote.create', 'quote.send', 'so.create', 'so.submit', 'so.view', 'item.view', 'inventory.view'] },
   SLM: { description: 'Sales manager',
          perms: ['crm.view', 'crm.manage', 'sales.view', 'partner.view', 'quote.create', 'quote.send', 'quote.discount.over', 'so.create', 'so.submit', 'so.view', 'so.approve~', 'so.cancel', 'customer.terms', 'item.view', 'inventory.view', 'reservation.allocate'] },
   SUP: { description: 'Line supervisor (own team)',
@@ -64,7 +64,7 @@ for (const [k, def] of Object.entries(ROLES)) {
 /** Display name for a permission key's area, used by the admin console. */
 export const AREAS: Record<string, string> = {
   user: 'Users', access: 'Access', role: 'Roles', site: 'Sites', audit: 'Audit', org: 'Organisation', unit: 'Units', item: 'Items',
-  partner: 'Partners', rate: 'Rates', po: 'Purchase orders', receipt: 'Receiving', qc: 'Quality', putaway: 'Putaway',
+  partner: 'Vendors & clients', mtype: 'Material types', rate: 'Rates', po: 'Purchase orders', receipt: 'Receiving', qc: 'Quality', putaway: 'Putaway',
   owner: 'Owner', crm: 'CRM', sales: 'Sales', quote: 'Quotations', so: 'Sales orders', customer: 'Customers', dispatch: 'Dispatch', escalation: 'Escalations', reservation: 'Reservations', adjustment: 'Adjustments', location: 'Locations', inventory: 'Inventory', hr: 'HR & payroll',
 };
 

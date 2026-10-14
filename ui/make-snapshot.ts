@@ -7,7 +7,7 @@ import { hashPassword } from './shims/password.js';
 
 const PASSWORD = 'Demo-Passw0rd!';
 const pool = await LitePool.create();
-const w = await buildWorld(pool as never, PASSWORD, { recent: false, owner: true, sales: true });
+const w = await buildWorld(pool as never, PASSWORD, { recent: false, owner: true, sales: true, masters: true });
 // The server hashes with scrypt; the browser demo signs in with WebCrypto, so store hashes it can verify.
 for (const u of (await pool.query('SELECT id FROM app_user')).rows)
   await pool.query('UPDATE app_user SET password_hash=$2 WHERE id=$1', [u.id, await hashPassword(PASSWORD)]);

@@ -41,5 +41,5 @@ export async function openWorld(pool: LitePool, onStage: (s: string) => void): P
     return world;
   }
   onStage('Creating the demo company, roles and master data…');
-  const built = await buildWorld(pool as never, undefined, { owner: true, sales: true }); await refreshOwnerDemo(built); return built;
+  const built = await buildWorld(pool as never, undefined, { owner: true, sales: true, masters: true }); await refreshOwnerDemo(built); return built;
 }

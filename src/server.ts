@@ -19,6 +19,7 @@ import * as rcv from './domain/receipt.js';
 import * as qc from './domain/qc.js';
 import * as inv from './domain/inventory.js';
 import * as q from './domain/queries.js';
+import * as mdata from './domain/master-data.js';
 import * as hr from './domain/hr.js';
 
 declare module 'fastify' { interface FastifyRequest { actor: Actor } }
@@ -97,6 +98,18 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
   cmd('/api/crm/leads/:id/status', 'crm.lead.status', z.object({ status: z.string(), reason: z.string().optional(), expectedVersion: ver }), (c, b, p) => sales.setLeadStatus(c, { leadId: p.id, ...b }));
   cmd('/api/crm/activities', 'crm.activity', z.object({ leadId: id.optional(), customerId: id.optional(), kind: z.string(), summary: z.string(), dueDate: z.string().optional() }), (c, b) => sales.addActivity(c, b), true);
   cmd('/api/crm/activities/:id/done', 'crm.activity.done', z.object({ outcome: z.string().optional() }), (c, b, p) => sales.completeActivity(c, { activityId: p.id, outcome: b.outcome }));
+  // Master data
+  const qs = (r: { query: unknown }) => r.query as Record<string, string | undefined>;
+  app.get('/api/material-types', read((db, a) => mdata.listMaterialTypes(db, a.id)));
+  app.get('/api/materials', read((db, a, r) => mdata.listMaterials(db, a.id, { q: qs(r).q, typeId: qs(r).type, status: qs(r).status })));
+  app.get('/api/materials/:id', read((db, a, r) => mdata.getMaterial(db, a.id, (r.params as { id: string }).id)));
+  cmd('/api/material-types', 'mtype.manage', z.object({ code: z.string(), name: z.string(), kind: z.string(), defaultUnit: z.string(), tracking: z.string().optional(), prefix: z.string().optional(), attrs: z.array(z.object({ key: z.string(), label: z.string(), type: z.enum(['number', 'text']), unit: z.string().optional(), required: z.boolean().optional() })).optional() }), (c, b) => mdata.createMaterialType(c, b), true);
+  cmd('/api/materials', 'item.create', z.object({ typeId: id, name: z.string(), code: z.string().optional(), unit: z.string().optional(), description: z.string().optional(), hsnCode: z.string().optional(), gstRate: z.string().optional(), reorderLevel: z.string().optional(), attributes: z.record(z.string(), z.unknown()).optional() }), (c, b) => mdata.createMaterial(c, b), true);
+  cmd('/api/materials/import', 'item.create', z.object({ csv: z.string(), dryRun: z.boolean().optional() }), (c, b) => mdata.importMaterials(c, b.csv, b.dryRun));
+  app.get('/api/parties', read((db, a, r) => mdata.listParties(db, a.id, { role: qs(r).role === 'customer' ? 'customer' : 'vendor', q: qs(r).q, status: qs(r).status })));
+  app.get('/api/parties/:id', read((db, a, r) => mdata.getParty(db, a.id, (r.params as { id: string }).id)));
+  cmd('/api/parties', 'partner.create', z.object({ name: z.string(), role: z.enum(['vendor', 'customer', 'both', 'subcontractor']), gstin: z.string().optional(), pan: z.string().optional(), city: z.string().optional(), state: z.string().optional(), phone: z.string().optional(), email: z.string().optional(), paymentDays: z.number().int().optional(), bankAccount: z.string().optional() }), (c, b) => mdata.createParty(c, b), true);
+  cmd('/api/parties/import', 'partner.create', z.object({ csv: z.string(), dryRun: z.boolean().optional() }), (c, b) => mdata.importParties(c, b.csv, b.dryRun));
   app.get('/api/customers', read((db, a) => sales.listCustomers(db, a.id)));
   cmd('/api/customers/:id/terms', 'customer.terms', z.object({ creditLimit: z.string(), paymentDays: z.number().int().optional() }), (c, b, p) => sales.setCreditTerms(c, { partnerId: p.id, ...b }));
   app.get('/api/quotes', read((db, a) => sales.listQuotes(db, a.id)));

@@ -15,7 +15,7 @@ npm install
 npm run migrate                 # create the schema
 npm run seed:demo               # demo company, site, roles, users (password: Demo-Passw0rd!  — dev only)
 npm start                       # API on http://localhost:3000
-npm test                        # 127 tests, each file on a fresh database
+npm test                        # 140 tests, each file on a fresh database
 ```
 
 Try it: `POST /api/login` → use the token as `Authorization: Bearer …`. **Every write needs an `Idempotency-Key`
@@ -77,6 +77,7 @@ The escalation time limits (24 h for orders, adjustments and leave; 72 h salary;
 | W04 reservations with atomic availability (concurrent requests cannot over-commit) | ✅ (reservations only) |
 | W06 adjustments: propose → independent approve (band) → post; never type over a balance | ◐ (no count workflow) |
 | **CRM + sales**: leads → follow-ups → quotation (max 10% discount without extra right, 15-day validity) → order (banded approval, creator ≠ approver, credit-limit check) → stock hold → dispatch by storekeeper (immutable dispatch note, consumes the hold, posts the stock ledger) | ✅ (no invoice or payment yet) |
+| **Master data**: material types (what each type must record, code letters, tracking), materials with HSN / GST / reorder level and type-driven attributes (draft → independent approval, switch off only when nothing uses it), vendors and clients with GSTIN/PAN checks, contacts, addresses, payment days, suspend/reactivate (bank or GSTIN change sends an approved party back for checking), vendor price lists, units, and all-or-nothing CSV bulk add | ✅ |
 | REST API + validation, clean errors, reads filtered by site scope | ✅ |
 
 The blueprint's own worked example (p.55: 500 m → 480 accepted / 20 rejected → reserve 120 → 360 left) and the
