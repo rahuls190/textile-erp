@@ -16,11 +16,15 @@ import * as q from '../src/domain/queries.js';
 import * as hr from '../src/domain/hr.js';
 import * as A from './views-admin.js';
 import * as H from './views-hr.js';
+import * as O from './views-owner.js';
 
 declare const __BUILD_ID__: string;
 
 type Item = { id: View; label: string; hint: string };
-const GROUPS: { title: string; key: 'ops' | 'people' | 'admin'; items: Item[] }[] = [
+const GROUPS: { title: string; key: 'control' | 'ops' | 'people' | 'admin'; items: Item[] }[] = [
+  { title: 'Control', key: 'control', items: [
+    { id: 'owner', label: 'Owner desk', hint: 'Every process on one page' },
+    { id: 'escalations', label: 'Urgent approvals', hint: 'Escalate and follow' } ] },
   { title: 'Operations', key: 'ops', items: [
     { id: 'po', label: 'Purchase orders', hint: 'Create, approve, release' },
     { id: 'receiving', label: 'Receiving', hint: 'Material arriving at the gate' },
@@ -39,7 +43,7 @@ const GROUPS: { title: string; key: 'ops' | 'people' | 'admin'; items: Item[] }[
 ];
 const ALL_VIEWS: View[] = ['overview', 'account', ...GROUPS.flatMap((g) => g.items.map((i) => i.id))];
 
-let vis = { ops: true, users: false, audit: false };
+let vis = { ops: true, users: false, audit: false, owner: false, esc: false };
 const rollBar = (r: { held: string; accepted: string; rejected: string; reserved: string; available: string }) => {
   const held = Number(r.held), rej = Number(r.rejected), res = Number(r.reserved), av = Math.max(Number(r.available), 0);
   const tot = held + rej + res + av || 1;
@@ -278,6 +282,7 @@ const ICONS: Record<string, string> = {
   quality: 'm12 2 9 4v6c0 5-9 10-9 10S3 17 3 12V6z m-5 10 3 3 5-6', stock: 'M3 3v18h18 M7 15l4-5 4 2 6-8', audit: 'M14 2H4v20h16V8z M14 2v6h6 M8 12h8M8 16h8',
   employees: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M20 21v-2a4 4 0 0 0-3-4 M17 3a4 4 0 0 1 0 8', attendance: 'M12 8v5l3 2 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
   leave: 'M3 5h18v16H3z M3 10h18 M8 3v4 M16 3v4', payroll: 'M3 5h17v15H3z M3 5V3h14 M15 10h7v6h-7z', users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
+  owner: 'M3 3h18v6H3z M3 13h8v8H3z M15 13h6v8h-6z', escalations: 'M12 2 2 20h20z M12 9v5 M12 17h.01',
   roles: 'm12 2 9 4v6c0 5-9 10-9 10S3 17 3 12V6z', signins: 'M10 13a5 5 0 0 0 7 0l4-4a5 5 0 0 0-7-7l-2 2 M14 11a5 5 0 0 0-7 0l-4 4a5 5 0 0 0 7 7l2-2' };
 const icon = (id: string) => raw(`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[id] ?? ICONS.overview}"/></svg>`);
 const initials = (n: string) => n.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
@@ -288,14 +293,14 @@ const DEMO_NOTE = 'Demo data lives only in this browser. Every account uses the 
 
 function shell(content: Raw): string {
   const me = PEOPLE[S.user] ?? { name: S.user, role: '' };
-  const items = (g: (typeof GROUPS)[number]) => g.items.filter((n) => (g.key === 'admin' ? (n.id === 'roles' || (n.id === 'audit' ? vis.audit : vis.users)) : true));
+  const items = (g: (typeof GROUPS)[number]) => g.items.filter((n) => (g.key === 'control' ? (n.id === 'owner' ? vis.owner : vis.esc) : g.key === 'admin' ? (n.id === 'roles' || (n.id === 'audit' ? vis.audit : vis.users)) : true));
   return html`
   <aside class="sidebar">
     <div class="brand"><img class="brand-logo" src="kalyani-logo.png" alt="Kalyani" /><span class="erp-label">Operations ERP · demo</span></div>
     <div class="workspace"><b>Kalyani Plant 1</b><small>Demo data, this browser only</small></div>
     <div class="nav-scroll"><nav class="side" aria-label="Sections">
       <a href="#overview" class="${S.view === 'overview' ? 'on' : ''}" data-view="overview">${icon('overview')}Overview</a>
-      ${GROUPS.filter((g) => g.key !== 'ops' || vis.ops).map((g) => html`<div class="grp">${g.title}</div>${items(g).map((n) => html`<a href="#${n.id}" class="${n.id === S.view ? 'on' : ''}" data-view="${n.id}" title="${n.hint}">${icon(n.id)}${n.label}</a>`)}`)}
+      ${GROUPS.filter((g) => (g.key !== 'ops' || vis.ops) && (g.key !== 'control' || vis.owner || vis.esc)).map((g) => html`<div class="grp">${g.title}</div>${items(g).map((n) => html`<a href="#${n.id}" class="${n.id === S.view ? 'on' : ''}" data-view="${n.id}" title="${n.hint}">${icon(n.id)}${n.label}</a>`)}`)}
     </nav></div>
     <div class="side-bottom"><button class="ghost reset" data-act="reset">Reset demo data</button></div>
   </aside>
@@ -335,13 +340,15 @@ async function computeVis() {
     ops: (await Promise.all(['po.view', 'inventory.view', 'qc.view', 'receipt.view'].map((p) => can(db, uid(), p, { anySite: true })))).some(Boolean),
     users: await can(db, uid(), 'user.view', { anySite: true }),
     audit: await can(db, uid(), 'audit.view', { anySite: true }),
+    owner: await can(db, uid(), 'owner.view', { anySite: true }),
+    esc: await can(db, uid(), 'escalation.view', { anySite: true }) || await can(db, uid(), 'owner.view', { anySite: true }),
   }));
 }
 
 const VIEWS: Record<View, () => Promise<Raw>> = {
   overview, po: poView, receiving: receivingView, quality: qualityView, stock: stockView, audit: auditView,
   employees: H.employeesView, attendance: H.attendanceView, leave: H.leaveView, payroll: H.payrollView,
-  users: A.usersView, roles: A.rolesView, signins: A.signinsView, account: A.accountView,
+  owner: O.ownerView, escalations: O.escalationsView, users: A.usersView, roles: A.rolesView, signins: A.signinsView, account: A.accountView,
 };
 
 let queued = false;
@@ -371,7 +378,7 @@ async function signIn(username: string, password: string): Promise<boolean> {
     if (!K.world.actors[username]) K.world.actors[username] = r.actor;
     S.user = username; S.token = r.token; S.mustChange = r.mustChangePassword; loginError = '';
     try { sessionStorage.setItem('erp-token', r.token); } catch { /* optional */ }
-    S.view = r.mustChangePassword ? 'account' : (S.view === 'account' ? 'overview' : S.view);
+    S.view = r.mustChangePassword ? 'account' : (S.view === 'account' || (username === 'own' && S.view === 'overview') ? (username === 'own' ? 'owner' : 'overview') : S.view);
     return true;
   } catch (e) { loginError = (e as Error).message; return false; }
 }
@@ -395,6 +402,7 @@ document.addEventListener('click', async (ev) => {
   if (nav) { ev.preventDefault(); if (S.mustChange) return toast('Choose a new password first', 'bad'); S.view = nav.dataset.view as View; history.replaceState(null, '', '#' + S.view); return render(); }
   if (await A.onClick(t)) return;
   if (await H.onClick(t)) return;
+  if (await O.onClick(t)) return;
   const pp = t.closest('[data-pick-po]') as HTMLElement | null; if (pp) { S.poId = pp.dataset.pickPo!; return render(); }
   const pq = t.closest('[data-pick-qc]') as HTMLElement | null; if (pq) { S.inspId = pq.dataset.pickQc!; return render(); }
   const pl = t.closest('[data-pick-lot]') as HTMLElement | null; if (pl) { S.lotId = S.lotId === pl.dataset.pickLot ? '' : pl.dataset.pickLot!; return render(); }
@@ -439,6 +447,7 @@ document.addEventListener('submit', async (ev) => {
   if (f.dataset.form === 'login') { if (await signIn(val('lg-user'), (document.getElementById('lg-pass') as HTMLInputElement).value)) return render(); return render(); }
   if (await A.onSubmit(f.dataset.form!)) return;
   if (await H.onSubmit(f.dataset.form!)) return;
+  if (await O.onSubmit(f.dataset.form!)) return;
   switch (f.dataset.form) {
     case 'newpo': {
       const partnerId = val('f-vendor'), itemId = val('f-item');

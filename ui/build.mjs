@@ -16,7 +16,7 @@ const shim = {
     to(/(^|\/)migrate(\.js)?$/, 'ui/shims/migrate.ts');
   },
 };
-const sig = createHash('sha1').update(readFileSync(resolve(root, 'src/db/migrations/001_init.sql'))).update(readFileSync(resolve(root, 'src/db/migrations/002_admin_hr.sql'))).update(readFileSync(resolve(root, 'src/seed/hr-demo.ts'))).update(readFileSync(resolve(root, 'src/seed/demo.ts'))).update(readFileSync(resolve(root, 'src/seed/rbac.ts'))).update(readFileSync(resolve(root, 'src/db/migrations/003_preferences.sql'))).update('v4').digest('hex').slice(0, 8);
+const sig = createHash('sha1').update(readFileSync(resolve(root, 'src/db/migrations/001_init.sql'))).update(readFileSync(resolve(root, 'src/db/migrations/002_admin_hr.sql'))).update(readFileSync(resolve(root, 'src/seed/hr-demo.ts'))).update(readFileSync(resolve(root, 'src/seed/demo.ts'))).update(readFileSync(resolve(root, 'src/seed/rbac.ts'))).update(readFileSync(resolve(root, 'src/db/migrations/003_preferences.sql'))).update(readFileSync(resolve(root, 'src/db/migrations/004_owner_escalation.sql'))).update(readFileSync(resolve(root, 'src/seed/owner-demo.ts'))).update('v5').digest('hex').slice(0, 8);
 await build({
   entryPoints: [resolve(root, 'ui/main.ts')],
   outfile: resolve(out, 'app.js'),

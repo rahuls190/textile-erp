@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { runCommand, type Actor, type Ctx } from '../src/core/command.js';
 import { buildWorld, type World } from '../src/seed/demo.js';
 import { seedHrRecent } from '../src/seed/hr-demo.js';
+import { refreshOwnerDemo } from '../src/seed/owner-demo.js';
 import type { LitePool } from './lite-pool.js';
 
 /** Rebuild the World handle from an already-seeded database (page reload with persisted data). */
@@ -36,8 +37,9 @@ export async function openWorld(pool: LitePool, onStage: (s: string) => void): P
     onStage('Opening your demo…');
     const world = await restoreWorld(pool);
     if (!(await pool.query('SELECT 1 FROM attendance LIMIT 1')).rowCount) { onStage('Preparing this month\u2019s attendance and leave…'); await seedHrRecent(world); }
+    if (!(await pool.query('SELECT 1 FROM escalation LIMIT 1')).rowCount) { onStage('Preparing the factory floor…'); await refreshOwnerDemo(world); }
     return world;
   }
   onStage('Creating the demo company, roles and master data…');
-  return buildWorld(pool as never);
+  const built = await buildWorld(pool as never, undefined, { owner: true }); await refreshOwnerDemo(built); return built;
 }

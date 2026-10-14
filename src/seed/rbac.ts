@@ -10,7 +10,7 @@ export const ROLES: Record<string, { description: string; perms: string[] }> = {
          perms: ['user.manage', 'user.view', 'access.assign', 'role.manage', 'site.provision', 'audit.view'] },
   MD: { description: 'Master-data steward / managing director',
         perms: ['org.create', 'org.edit', 'unit.create', 'item.create', 'item.edit', 'item.submit', 'item.view',
-                'partner.create', 'partner.submit', 'partner.view', 'inventory.view', 'po.view', 'hr.salary.propose', 'hr.salary.approve'] },
+                'partner.create', 'partner.submit', 'partner.view', 'inventory.view', 'po.view', 'hr.salary.propose', 'hr.salary.approve', 'escalation.raise', 'escalation.senior', 'escalation.view'] },
   ENG: { description: 'Engineer / technical approver',
          perms: ['item.create', 'item.edit', 'item.submit', 'item.approve', 'item.view', 'inventory.view'] },
   BUY: { description: 'Buyer',
@@ -33,7 +33,7 @@ export const ROLES: Record<string, { description: string; perms: string[] }> = {
   PPC: { description: 'Production planner',
          perms: ['reservation.allocate', 'inventory.view', 'item.view', 'po.view'] },
   FC: { description: 'Finance controller',
-        perms: ['hr.salary.approve', 'hr.salary.view', 'hr.payroll.approve', 'hr.payroll.view', 'hr.employee.view', 'hr.bank.view', 'org.approve', 'partner.bank.approve', 'partner.bank.view', 'partner.view', 'po.view', 'inventory.view', 'audit.view'] },
+        perms: ['hr.salary.approve', 'hr.salary.view', 'hr.payroll.approve', 'hr.payroll.view', 'hr.employee.view', 'hr.bank.view', 'escalation.raise', 'escalation.senior', 'escalation.view', 'org.approve', 'partner.bank.approve', 'partner.bank.view', 'partner.view', 'po.view', 'inventory.view', 'audit.view'] },
   AUD: { description: 'Auditor (read-only)',
          perms: ['audit.view', 'user.view', 'hr.employee.view', 'hr.attendance.view', 'hr.leave.view', 'inventory.view', 'po.view', 'item.view', 'partner.view', 'receipt.view', 'qc.view'] },
   HRM: { description: 'HR manager',
@@ -43,15 +43,25 @@ export const ROLES: Record<string, { description: string; perms: string[] }> = {
                  'hr.salary.propose', 'hr.salary.view', 'hr.payroll.create', 'hr.payroll.view'] },
   HRE: { description: 'HR executive (no salary access)',
          perms: ['hr.employee.view', 'hr.employee.create', 'hr.employee.edit', 'hr.attendance.view', 'hr.attendance.mark', 'hr.leave.view'] },
+  OWN: { description: 'Business owner (sees everything, can override approvals)',
+         perms: ['owner.view', 'owner.override', 'escalation.raise', 'escalation.senior', 'escalation.view', 'audit.view', 'user.view',
+                 'inventory.view', 'po.view', 'item.view', 'partner.view', 'receipt.view', 'qc.view',
+                 'hr.employee.view', 'hr.attendance.view', 'hr.leave.view', 'hr.payroll.view', 'hr.salary.view'] },
   SUP: { description: 'Line supervisor (own team)',
          perms: ['hr.employee.view', 'hr.attendance.view', 'hr.attendance.mark', 'hr.leave.view', 'hr.leave.approve'] },
 };
+
+/** Everyone who works in the business can raise an urgent-approval escalation and follow the ones they raised. */
+for (const [k, def] of Object.entries(ROLES)) {
+  if (k === 'ADM' || k === 'AUD') continue;
+  for (const p of ['escalation.raise', 'escalation.view']) if (!def.perms.includes(p)) def.perms.push(p);
+}
 
 /** Display name for a permission key's area, used by the admin console. */
 export const AREAS: Record<string, string> = {
   user: 'Users', access: 'Access', role: 'Roles', site: 'Sites', audit: 'Audit', org: 'Organisation', unit: 'Units', item: 'Items',
   partner: 'Partners', rate: 'Rates', po: 'Purchase orders', receipt: 'Receiving', qc: 'Quality', putaway: 'Putaway',
-  reservation: 'Reservations', adjustment: 'Adjustments', location: 'Locations', inventory: 'Inventory', hr: 'HR & payroll',
+  owner: 'Owner', escalation: 'Escalations', reservation: 'Reservations', adjustment: 'Adjustments', location: 'Locations', inventory: 'Inventory', hr: 'HR & payroll',
 };
 
 /** Every known permission, derived from the role catalogue (plus anything the console adds later). */

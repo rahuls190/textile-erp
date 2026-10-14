@@ -157,9 +157,9 @@ async function loadAdjustment(db: Db, id: string, expectedVersion: number) {
 export async function approveAdjustment(ctx: Ctx, i: { adjustmentId: string; expectedVersion: number; approve: boolean }) {
   const a = await loadAdjustment(ctx.db, i.adjustmentId, i.expectedVersion);
   const size = toScaled(a.qty_delta) < 0n ? qSub('0', a.qty_delta) : a.qty_delta;
-  await assertCan(ctx.db, ctx.actor.id, 'adjustment.approve', { siteId: a.site_id, amount: size });
+  if (!ctx.override) await assertCan(ctx.db, ctx.actor.id, 'adjustment.approve', { siteId: a.site_id, amount: size });
   if (a.status !== 'proposed') throw invalidState(`Adjustment is ${a.status}`);
-  assertIndependent(ctx.actor.id, a.proposed_by, 'stock adjustment');
+  if (!ctx.override) assertIndependent(ctx.actor.id, a.proposed_by, 'stock adjustment');
   const r = await ctx.db.query(
     `UPDATE stock_adjustment SET status=$2, approved_by=$3, version=version+1 WHERE id=$1 RETURNING *`,
     [a.id, i.approve ? 'approved' : 'rejected', ctx.actor.id]);

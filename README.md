@@ -15,7 +15,7 @@ npm install
 npm run migrate                 # create the schema
 npm run seed:demo               # demo company, site, roles, users (password: Demo-Passw0rd!  — dev only)
 npm start                       # API on http://localhost:3000
-npm test                        # 81 tests, each file on a fresh database
+npm test                        # 92 tests, each file on a fresh database
 ```
 
 Try it: `POST /api/login` → use the token as `Authorization: Bearer …`. **Every write needs an `Idempotency-Key`
@@ -36,6 +36,9 @@ Demo logins use the password above; the login screen has one-click person chips.
 | Users: create, edit, suspend/reactivate, unlock, reset password (ends sessions) | ✅ |
 | Roles are data: assign per site with amount limit and expiry, revoke with reason, **edit role permissions and descriptions** (reason required), add custom roles, delete unused roles | ✅ |
 | Per-user appearance (theme, colour, layout, density), saved on the account and applied on any device | ✅ |
+| **Owner desk**: one visual page, every process end to end (buying → receiving → quality → stock; people → attendance → leave → payroll), what is waiting and how long | ✅ |
+| **Escalation ladder** for urgent approvals: approver → senior management → owner. Urgent climbs by itself if nobody acts; critical goes straight to the owner; items that wait past their limit are raised automatically | ✅ |
+| **Owner override**: approve or reject any pending item (PO, stock adjustment, leave, salary, payroll) past the approver's limit and the separation-of-duties rule. A written reason is required, the record shows the owner decided, and it goes in an append-only log shown on the owner desk | ✅ |
 | Guards: no self-access changes, never remove the last administrator; the admin role keeps user, role and access management and cannot be deleted | ✅ |
 | HR: employee register (site-scoped, bank masked), departments, designations, shifts, holidays | ✅ |
 | Attendance (P/A/H/L/LWP/WO/HOL, late/overtime from the shift), locked once payroll is approved | ✅ |
@@ -45,6 +48,10 @@ Demo logins use the password above; the login screen has one-click person chips.
 **Statutory payroll rates are defaults, not advice** (PF 12% on basic capped at ₹15,000, ESI 0.75%/3.25% up to ₹21,000 gross,
 professional tax ₹200 from ₹25,000, overtime at double the basic hourly rate). They live in `PAYROLL_RULES` in `src/domain/hr.ts`.
 Have your accountant confirm them for your state before paying anyone. Income-tax (TDS) is not handled.
+
+The escalation time limits (24 h for orders, adjustments and leave; 72 h salary; 48 h payroll; 4 h per rung) are defaults in
+`ESCALATION_RULES` in `src/domain/owner.ts`. The check runs when someone presses the button in the demo; in real use it must be scheduled
+(call `sweepEscalations` every few minutes). Notifications by SMS/WhatsApp/email are not built: people see escalations when they open the app.
 
 ## What is built (blueprint IDs)
 

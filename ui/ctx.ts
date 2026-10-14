@@ -11,7 +11,7 @@ export const DEMO_PASSWORD = 'Demo-Passw0rd!';
 export type View =
   | 'overview' | 'po' | 'receiving' | 'quality' | 'stock'
   | 'employees' | 'attendance' | 'leave' | 'payroll'
-  | 'users' | 'roles' | 'audit' | 'signins' | 'account';
+  | 'users' | 'roles' | 'audit' | 'signins' | 'account' | 'owner' | 'escalations';
 
 export const K = { world: null as unknown as World, pool: null as unknown as LitePool };
 export const R = { render: async () => {}, scheduleRender: () => {} };
@@ -23,6 +23,8 @@ export const S = {
   payLog: [] as Step[], empId: '', attDate: '', attEmp: '', leaveScope: 'mine' as 'mine' | 'team' | 'all', runId: '', slipId: '', payTab: 'runs' as 'runs' | 'salary' | 'mine', empAll: false,
   // admin
   userSel: '', roleSel: '', roleDraft: null as null | Set<string>,
+  // owner desk: the demo clock can be moved forward to watch escalations climb the ladder
+  skewHours: 0, ovr: '' as string, escFor: '' as string,
 };
 
 export const $ = (s: string) => document.querySelector(s) as HTMLElement;
@@ -74,6 +76,11 @@ export const PEOPLE: Record<string, { name: string; role: string }> = {
   hre: { name: 'Rohan Das', role: 'HR executive' },
   sup: { name: 'Ganesh Patil', role: 'Line supervisor' },
   emp: { name: 'Sunita Kamble', role: 'Machine operator (no system role)' },
+  own: { name: 'Business owner', role: 'Owner · sees everything, can override approvals' },
   admin: { name: 'System admin', role: 'Administrator (no business approvals)' },
 };
-export const ORDER = ['admin', 'hrm', 'hre', 'sup', 'emp', 'buy', 'com', 'sto', 'qci', 'qcm', 'inv', 'md', 'eng', 'fc', 'aud'];
+export const ORDER = ['own', 'admin', 'hrm', 'hre', 'sup', 'emp', 'buy', 'com', 'sto', 'qci', 'qcm', 'inv', 'md', 'eng', 'fc', 'aud'];
+
+/** The demo clock: real time plus any hours the owner has fast-forwarded. */
+export const demoNow = () => new Date(Date.now() + S.skewHours * 3600000);
+export const hoursText = (h: number) => (h < 1 ? `${Math.max(1, Math.round(h * 60))} min` : h < 24 ? `${Math.round(h)} h` : `${Math.floor(h / 24)} d ${Math.round(h % 24)} h`);

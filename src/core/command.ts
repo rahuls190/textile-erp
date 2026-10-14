@@ -2,7 +2,8 @@ import type { Pool, Db } from '../db/pool.js';
 import { AppError, conflict } from './errors.js';
 
 export interface Actor { id: string; username: string }
-export interface Ctx { db: Db; actor: Actor; requestId: string; action: string }
+/** `override` is set only by the owner-override command: it waives the approver's band and separation-of-duties checks, and is always logged. */
+export interface Ctx { db: Db; actor: Actor; requestId: string; action: string; override?: boolean }
 export interface CommandResult<T> { result: T; replayed: boolean }
 
 /**

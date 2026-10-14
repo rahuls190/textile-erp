@@ -111,8 +111,8 @@ export async function approvePO(ctx: Ctx, i: { poId: string; expectedVersion: nu
   const amendment = po.pending_amendment as null | { reason: string; lines: { lineId: string; qty: string; rate: string; dueDate: string | null }[]; newTotal: string };
 
   if (amendment) {
-    await assertCan(ctx.db, ctx.actor.id, 'po.approve', { siteId: po.site_id, amount: amendment.newTotal });
-    assertIndependent(ctx.actor.id, po.amended_by, 'amendment');
+    if (!ctx.override) { await assertCan(ctx.db, ctx.actor.id, 'po.approve', { siteId: po.site_id, amount: amendment.newTotal });
+    assertIndependent(ctx.actor.id, po.amended_by, 'amendment'); }
     for (const l of amendment.lines)
       await ctx.db.query('UPDATE po_line SET qty=$2, rate=$3, due_date=$4 WHERE id=$1', [l.lineId, l.qty, l.rate, l.dueDate]);
     const u = await bump(ctx, po.id, 'total=$2, revision=revision+1, pending_amendment=NULL, amended_by=NULL', [amendment.newTotal]);
@@ -124,8 +124,8 @@ export async function approvePO(ctx: Ctx, i: { poId: string; expectedVersion: nu
   }
 
   if (po.status !== 'approval_pending') throw invalidState(`PO is ${po.status}; only submitted POs can be approved`);
-  await assertCan(ctx.db, ctx.actor.id, 'po.approve', { siteId: po.site_id, amount: po.total });
-  assertIndependent(ctx.actor.id, po.created_by, 'purchase order');
+  if (!ctx.override) { await assertCan(ctx.db, ctx.actor.id, 'po.approve', { siteId: po.site_id, amount: po.total });
+  assertIndependent(ctx.actor.id, po.created_by, 'purchase order'); }
   const u = await bump(ctx, po.id, `status='approved', approved_by=$2`, [ctx.actor.id]);
   await snapshot(ctx, po.id, 'approved');
   await audit(ctx, { action: 'po.approve', entityType: 'purchase_order', entityId: po.id, before: { status: po.status }, after: { status: u.status } });
@@ -136,7 +136,7 @@ export async function approvePO(ctx: Ctx, i: { poId: string; expectedVersion: nu
 export async function returnPO(ctx: Ctx, i: { poId: string; expectedVersion: number; reason: string }) {
   if (!i.reason) throw badRequest('A reason is required');
   const po = await loadPO(ctx.db, i.poId, i.expectedVersion);
-  await assertCan(ctx.db, ctx.actor.id, 'po.approve', { siteId: po.site_id, amount: po.pending_amendment?.newTotal ?? po.total });
+  if (!ctx.override) await assertCan(ctx.db, ctx.actor.id, 'po.approve', { siteId: po.site_id, amount: po.pending_amendment?.newTotal ?? po.total });
   let u;
   if (po.pending_amendment) u = await bump(ctx, po.id, 'pending_amendment=NULL, amended_by=NULL');
   else if (po.status === 'approval_pending') u = await bump(ctx, po.id, `status='draft'`);

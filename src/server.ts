@@ -4,7 +4,8 @@ import { createPool, type Pool } from './db/pool.js';
 import { migrate } from './migrate.js';
 import { actorFromToken, login, logout, changeOwnPassword } from './core/auth.js';
 import { runCommand, type Actor, type Ctx } from './core/command.js';
-import { AppError, badRequest, unauthorized } from './core/errors.js';
+import { AppError, badRequest, forbidden, unauthorized } from './core/errors.js';
+import * as owner from './domain/owner.js';
 import * as prefs from './domain/prefs.js';
 import * as admin from './domain/admin.js';
 import * as masters from './domain/masters.js';
@@ -83,6 +84,17 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
   app.get('/api/me/preferences', read((db, a) => prefs.getPreferences(db, a.id)));
   cmd('/api/me/preferences', 'user.preferences', z.object({ theme: z.string().optional(), accent: z.string().optional(), layout: z.string().optional(), density: z.string().optional(), reset: z.boolean().optional() }),
     (c, b) => prefs.setPreferences(c, b.reset ? { reset: true } : (b as never)));
+  // ── owner desk, escalation ladder, override ──
+  const itemType = z.enum(['purchase_order', 'stock_adjustment', 'leave_request', 'salary_structure', 'payroll_run']);
+  app.get('/api/owner', read(async (db, a) => { const d = await owner.ownerDashboard(db, a.id); if (!d) throw forbidden('Not permitted: owner.view'); return d; }));
+  app.get('/api/approvals/pending', read((db, a) => owner.pendingItems(db, a.id)));
+  app.get('/api/escalations', read((db, a, req) => owner.listEscalations(db, a.id, { status: (req.query as { status?: string }).status === 'all' ? 'all' : 'open' })));
+  app.get('/api/overrides', read(async (db, a) => { const r = await owner.listOverrides(db, a.id); if (!r) throw forbidden('Not permitted'); return r; }));
+  cmd('/api/escalations', 'escalation.raise', z.object({ entityType: itemType, entityId: id, urgency: z.enum(['urgent', 'critical']), reason: z.string().min(8) }), (c, b) => owner.raiseEscalation(c, b), true);
+  cmd('/api/escalations/:id/up', 'escalation.up', z.object({ note: z.string().optional() }), (c, b, p) => owner.escalateUp(c, { escalationId: p.id, note: b.note }));
+  cmd('/api/escalations/:id/cancel', 'escalation.cancel', z.object({ reason: z.string().min(3) }), (c, b, p) => owner.cancelEscalation(c, { escalationId: p.id, reason: b.reason }));
+  cmd('/api/escalations/sweep', 'escalation.sweep', z.object({ asOf: z.string().optional() }), (c, b) => owner.sweepEscalations(c, b));
+  cmd('/api/owner/override', 'owner.override', z.object({ entityType: itemType, entityId: id, decision: z.enum(['approve', 'reject']), reason: z.string().min(10) }), (c, b) => owner.ownerOverride(c, b));
   app.get('/api/me', read((db, a) => q.myAccess(db, a.id).then((access) => ({ user: a.username, access }))));
   app.get('/api/items', read((db, a) => q.listItems(db, a.id)));
   app.get('/api/partners', read((db, a) => q.listPartners(db, a.id)));
