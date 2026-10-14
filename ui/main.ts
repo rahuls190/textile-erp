@@ -18,6 +18,7 @@ import * as A from './views-admin.js';
 import * as H from './views-hr.js';
 import * as O from './views-owner.js';
 import * as P from './views-reports.js';
+import * as O2 from './views-overview.js';
 import * as P0 from '../src/domain/reports.js';
 
 declare const __BUILD_ID__: string;
@@ -57,50 +58,7 @@ const rollBar = (r: { held: string; accepted: string; rejected: string; reserved
 const legend = html`<div class="legend"><span><i class="av"></i>Free</span><span><i class="rs"></i>Reserved</span><span><i class="hd"></i>On QC hold</span><span><i class="rj"></i>Rejected</span></div>`;
 
 // ───────────── views ─────────────
-async function overview(): Promise<Raw> {
-  const d = await read(async (db) => {
-    const pos = await po.listPOs(db, uid());
-    const insp = await qc.listInspections(db, uid());
-    const stock = await q.stockSummary(db, uid());
-    const access = await q.myAccess(db, uid());
-    const people = await hr.listEmployees(db, uid());
-    const leaveWait = (await hr.listLeave(db, uid(), 'all')).filter((l) => l.status === 'pending' && l.applied_by !== uid()).length + (await hr.listLeave(db, uid(), 'team')).filter((l) => l.status === 'pending' && l.applied_by !== uid()).length;
-    const checks: [string, string, string][] = [
-      ['Approve a purchase order', 'po.approve', '120000'], ['Release a purchase order', 'po.release', '120000'], ['Receive material', 'receipt.post', ''],
-      ['Release stock from QC hold', 'qc.release', ''], ['Reserve stock', 'reservation.allocate', ''], ['Approve a stock adjustment', 'adjustment.approve', '50'], ['Read the audit trail', 'audit.view', ''],
-      ['Approve payroll', 'hr.payroll.approve', ''], ['See salaries', 'hr.salary.view', ''], ['Manage users and roles', 'user.manage', ''],
-    ];
-    const perms = [] as { label: string; ok: boolean }[];
-    for (const [label, key, amt] of checks) perms.push({ label, ok: await can(db, uid(), key, { siteId: K.world.siteId, amount: amt || undefined, anySite: ['audit.view', 'user.manage'].includes(key) }) });
-    return { pos, insp, stock, access, perms, people, leaveWait };
-  });
-  const free = d.stock.reduce((a, s) => qAdd(a, s.available), '0');
-  const kpi = (label: string, v: string | number, sub: string) => html`<div class="kpi"><span>${label}</span><b>${v}</b><small>${sub}</small></div>`;
-  const me = PEOPLE[S.user];
-  return html`
-  ${head('Overview', 'One company, one set of rules. Switch who you are acting as at the top to see what each role can and cannot do.')}
-  <section class="kpis">
-    ${kpi('Awaiting approval', d.pos.filter((p) => p.status === 'approval_pending').length, 'purchase orders')}
-    ${kpi('Open for receipt', d.pos.filter((p) => ['released', 'acknowledged', 'partial_receipt'].includes(p.status)).length, 'purchase orders')}
-    ${kpi('Quality queue', d.insp.filter((i) => ['pending', 'inspecting', 'submitted', 'partial', 'held'].includes(i.status)).length, 'inspections')}
-    ${kpi('Free stock', qty(free), 'metres, not held or reserved')}
-    ${d.people.length > 1 ? kpi('People', d.people.length, 'active employees') : ''}
-    ${kpi('Leave to decide', d.leaveWait, 'requests waiting for you')}
-  </section>
-  <section class="cols">
-    <div class="card">
-      <h2>${me.name}</h2><p class="sub">${me.role}</p>
-      <ul class="perm">${d.perms.map((p) => html`<li class="${p.ok ? 'yes' : 'no'}"><span>${p.ok ? '✓' : '✕'}</span>${p.label}</li>`)}</ul>
-      <p class="note">Every action is checked by the rules engine, not just hidden on the screen. Try a blocked one from the other pages and you will get the refusal with its reason.</p>
-    </div>
-    <div class="card">
-      <h2>Worked example</h2>
-      <p class="sub">500 m of fabric from purchase order to reservation, played through the real rules by the people involved, including the steps the system has to refuse.</p>
-      <button class="primary" data-act="walk" ${S.running ? raw('disabled') : ''}>${S.running ? 'Running…' : 'Run the 500 m example'}</button>
-      ${S.log.length ? html`<ol class="steps">${S.log.map((s) => html`<li class="${s.ok && s.note?.startsWith('Refused') ? 'refused' : s.ok ? 'done' : 'fail'}"><span class="who">${PEOPLE[s.who]?.role.split(' · ')[0]}</span><div><b>${s.text}</b>${s.note ? html`<small>${s.note}</small>` : ''}</div></li>`)}</ol>` : html`<p class="empty">Each run adds a new purchase order and roll to the lists, so you can open them afterwards.</p>`}
-    </div>
-  </section>`;
-}
+const overview = O2.overviewView;
 
 async function poView(): Promise<Raw> {
   const d = await read(async (db) => {
