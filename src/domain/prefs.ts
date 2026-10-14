@@ -9,7 +9,7 @@ export const PREF_OPTIONS = {
   density: ['comfortable', 'compact'],
 } as const;
 export type Preferences = { [K in keyof typeof PREF_OPTIONS]: (typeof PREF_OPTIONS)[K][number] };
-export const DEFAULT_PREFS: Preferences = { theme: 'system', accent: 'kalyani', layout: 'sidebar', density: 'comfortable' };
+export const DEFAULT_PREFS: Preferences = { theme: 'light', accent: 'kalyani', layout: 'sidebar', density: 'comfortable' };
 
 /** Anyone can read and change only their own settings; unknown or invalid values are ignored on read and refused on write. */
 export async function getPreferences(db: Db, userId: string): Promise<Preferences> {

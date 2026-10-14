@@ -14,7 +14,7 @@ describe('per-user appearance settings', () => {
     await w.as('buy', (c) => prefs.setPreferences(c, { density: 'compact' }));
     const a = await prefs.getPreferences(w.pool, w.actors.admin.id), b = await prefs.getPreferences(w.pool, w.actors.buy.id);
     expect(a).toMatchObject({ theme: 'dark', accent: 'ocean', layout: 'topbar', density: 'comfortable' });
-    expect(b).toMatchObject({ theme: 'system', accent: 'kalyani', density: 'compact' });
+    expect(b).toMatchObject({ theme: 'light', accent: 'kalyani', density: 'compact' });
   });
   it('refuses unknown settings or values, and can reset', async () => {
     await rejects(w.as('admin', (c) => prefs.setPreferences(c, { theme: 'neon' } as never)), 'BAD_REQUEST');
