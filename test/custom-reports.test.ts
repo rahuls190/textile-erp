@@ -119,3 +119,19 @@ describe('saved custom reports', () => {
     expect((await cr.listSaved(w.pool, w.actors.own.id)).map((x) => x.name)).toEqual(['Private POs']);
   });
 });
+
+describe('the built-in reader is forgiving', () => {
+  it('copes with typing slips, number words and years', async () => {
+    const a = await ask('own', 'need all purchse value in last one yera by vender');
+    expect(a.spec).toMatchObject({ dataset: 'purchase_orders', group: ['vendor'], measures: [{ field: 'total', agg: 'sum' }] });
+    const days = (Date.now() - Date.parse(a.spec.filters[0].value)) / 86400000;
+    expect(days).toBeGreaterThan(364); expect(days).toBeLessThan(367);
+    const b = await ask('hrm', 'how many employes by departmnt');
+    expect(b.spec).toMatchObject({ dataset: 'employees', group: ['department'] });
+  });
+  it('says plainly when the data is not in the system', async () => {
+    const e = await ask('own', 'need all sale in last one year').catch((x) => x);
+    expect(e.message).toContain('sales module is not built');
+    expect(e.message).toContain('purchase orders');
+  });
+});

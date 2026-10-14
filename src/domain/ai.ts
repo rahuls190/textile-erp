@@ -47,8 +47,41 @@ function parseJson(text: string): Record<string, unknown> {
 const norm = (s: string) => ' ' + s.toLowerCase().replace(/[^a-z0-9₹.\- ]+/g, ' ').replace(/\s+/g, ' ') + ' ';
 const has = (q: string, w: string) => q.includes(' ' + w + ' ') || (w.length > 3 && q.includes(' ' + w));
 
+/** Optimal-string-alignment distance: a swapped or missing letter counts as one slip. */
+function dist(a: string, b: string): number {
+  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 0; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) {
+    d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
+  }
+  return d[a.length][b.length];
+}
+const BASE_WORDS = ['last', 'this', 'month', 'year', 'week', 'days', 'today', 'top', 'bottom', 'highest', 'lowest', 'total', 'average', 'count', 'many', 'number', 'wise', 'past', 'previous', 'pending', 'approved', 'cancelled', 'rejected', 'absent'];
+/** Fix small typing slips ("yera", "vender", "employes") against the words the reader knows. */
+function fixTypos(text: string, allowed: typeof DATASETS): string {
+  const vocab = new Set<string>(BASE_WORDS);
+  for (const d of allowed) { d.words.forEach((w) => w.split(' ').forEach((t) => vocab.add(t))); d.fields.forEach((f) => f.words.forEach((w) => w.split(' ').forEach((t) => vocab.add(t)))); }
+  const list = [...vocab].filter((w) => w.length >= 4);
+  return text.replace(/[a-z]+/gi, (tok) => {
+    const t = tok.toLowerCase();
+    if (t.length < 4 || vocab.has(t)) return tok;
+    const max = t.length > 6 ? 2 : 1;
+    let best: string | null = null, bd = 99;
+    for (const w of list) { if (Math.abs(w.length - t.length) > max) continue; const x = dist(t, w); if (x < bd) { bd = x; best = w; } }
+    return best && bd <= max ? best : tok;
+  });
+}
+const NUMWORD: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
+/** Things people ask about that this system does not hold yet. Better to say so than to guess. */
+const NOT_BUILT: [RegExp, string][] = [
+  [/ (sale|sales|sold|selling|customer|customers|invoice|invoices|revenue|dispatch) /, 'Sales and customer data are not in the system yet (the sales module is not built).'],
+  [/ (production|stitching|cutting|wip|garments?) /, 'Production data is not in the system yet.'],
+  [/ (profit|expense|expenses|ledger|gst|tax invoice|accounts?) /, 'Finance and accounting data are not in the system yet.'],
+];
+
 export function builtIn(question: string, allowed: typeof DATASETS): Interpretation {
-  const q = norm(question);
+  const q = norm(fixTypos(question, allowed));
   let best: { d: (typeof DATASETS)[number]; score: number } | null = null;
   for (const d of allowed) {
     let score = 0;
@@ -57,6 +90,8 @@ export function builtIn(question: string, allowed: typeof DATASETS): Interpretat
     if (score > (best?.score ?? 0)) best = { d, score };
   }
   if (!best) {
+    const nb = NOT_BUILT.find(([re]) => re.test(q));
+    if (nb) throw badRequest(`${nb[1]} What I can report on: ${allowed.map((d) => d.label.toLowerCase()).join(', ')}.`);
     throw badRequest(`I could not tell which data you mean. Try naming it: ${allowed.map((d) => d.label.toLowerCase()).join(', ')}.`);
   }
   const d = best.d;
@@ -83,10 +118,11 @@ export function builtIn(question: string, allowed: typeof DATASETS): Interpretat
   else if (meas.length) spec.measures.push({ field: meas[0].key, agg: 'sum' });
   // dates
   const df = d.fields.find((f) => f.key === d.dateField)!;
-  const nDays = q.match(/ (?:last|past|previous) (\d+) (day|week|month)s? /);
+  const nDays0 = q.match(/ (?:last|past|previous) (\d+|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)? ?(day|week|month|year)s? /);
+  const nDays = nDays0 ? [nDays0[0], String(nDays0[1] ? (NUMWORD[nDays0[1]] ?? nDays0[1]) : 1), nDays0[3] ?? nDays0[2]] : null;
   const t = today();
   const range = (from: string, to?: string) => { spec.filters.push({ field: df.key, op: 'gte', value: from }); if (to) spec.filters.push({ field: df.key, op: 'lte', value: to }); };
-  if (nDays) range(addDays(t, -Number(nDays[1]) * (nDays[2] === 'day' ? 1 : nDays[2] === 'week' ? 7 : 30)));
+  if (nDays) range(addDays(t, -Number(nDays[1]) * (nDays[2] === 'day' ? 1 : nDays[2] === 'week' ? 7 : nDays[2] === 'month' ? 30 : 365)));
   else if (/ this month /.test(q)) range(t.slice(0, 8) + '01');
   else if (/ last month /.test(q)) { const y = +t.slice(0, 4), mo = +t.slice(5, 7); const f = new Date(Date.UTC(y, mo - 2, 1)); range(f.toISOString().slice(0, 10), new Date(Date.UTC(y, mo - 1, 0)).toISOString().slice(0, 10)); }
   else if (/ this year /.test(q)) range(t.slice(0, 4) + '-01-01');

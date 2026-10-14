@@ -9,6 +9,7 @@ import * as owner from './domain/owner.js';
 import * as reports from './domain/reports.js';
 import * as custom from './domain/custom-reports.js';
 import * as ai from './domain/ai.js';
+import * as barcode from './domain/barcode.js';
 import * as prefs from './domain/prefs.js';
 import * as admin from './domain/admin.js';
 import * as masters from './domain/masters.js';
@@ -87,6 +88,10 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
   app.get('/api/me/preferences', read((db, a) => prefs.getPreferences(db, a.id)));
   cmd('/api/me/preferences', 'user.preferences', z.object({ theme: z.string().optional(), accent: z.string().optional(), layout: z.string().optional(), density: z.string().optional(), reset: z.boolean().optional() }),
     (c, b) => prefs.setPreferences(c, b.reset ? { reset: true } : (b as never)));
+  // ── barcodes: read a scanned code, list labels to print, move a roll forward ──
+  app.get('/api/scan', read((db, a, req) => barcode.resolveScan(db, a.id, String((req.query as { code?: string }).code ?? ''))));
+  app.get('/api/labels', read((db, a) => barcode.labelData(db, a.id)));
+  cmd('/api/stock/forward', 'inventory.forward', z.object({ lotCode: z.string().min(1), toLocationCode: z.string().min(1), qty: z.string().optional() }), (c, b) => barcode.moveForward(c, b));
   // ── reports (read-only; each run is audited) ──
   app.get('/api/reports', read((db, a) => reports.listReports(db, a.id)));
   app.get('/api/reports/runs', read(async (db, a) => { const r = await reports.recentRuns(db, a.id); if (!r) throw forbidden('Not permitted: audit.view'); return r; }));

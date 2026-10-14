@@ -19,6 +19,7 @@ import * as H from './views-hr.js';
 import * as O from './views-owner.js';
 import * as P from './views-reports.js';
 import * as O2 from './views-overview.js';
+import * as B from './views-barcode.js';
 import * as P0 from '../src/domain/reports.js';
 
 declare const __BUILD_ID__: string;
@@ -34,7 +35,8 @@ const GROUPS: { title: string; key: 'control' | 'reports' | 'ops' | 'people' | '
     { id: 'po', label: 'Purchase orders', hint: 'Create, approve, release' },
     { id: 'receiving', label: 'Receiving', hint: 'Material arriving at the gate' },
     { id: 'quality', label: 'Quality', hint: 'Inspect and release' },
-    { id: 'stock', label: 'Stock', hint: 'Rolls, reservations, adjustments' } ] },
+    { id: 'stock', label: 'Stock', hint: 'Rolls, reservations, adjustments' },
+    { id: 'barcodes', label: 'Scan & labels', hint: 'Print barcodes, scan, move forward' } ] },
   { title: 'People', key: 'people', items: [
     { id: 'employees', label: 'Employees', hint: 'Register, reporting lines' },
     { id: 'attendance', label: 'Attendance', hint: 'Daily marks, shifts, overtime' },
@@ -244,7 +246,7 @@ const ICONS: Record<string, string> = {
   quality: 'm12 2 9 4v6c0 5-9 10-9 10S3 17 3 12V6z m-5 10 3 3 5-6', stock: 'M3 3v18h18 M7 15l4-5 4 2 6-8', audit: 'M14 2H4v20h16V8z M14 2v6h6 M8 12h8M8 16h8',
   employees: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M20 21v-2a4 4 0 0 0-3-4 M17 3a4 4 0 0 1 0 8', attendance: 'M12 8v5l3 2 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
   leave: 'M3 5h18v16H3z M3 10h18 M8 3v4 M16 3v4', payroll: 'M3 5h17v15H3z M3 5V3h14 M15 10h7v6h-7z', users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
-  owner: 'M3 3h18v6H3z M3 13h8v8H3z M15 13h6v8h-6z', escalations: 'M12 2 2 20h20z M12 9v5 M12 17h.01', reports: 'M4 20V10 M10 20V4 M16 20v-7 M22 20H2',
+  owner: 'M3 3h18v6H3z M3 13h8v8H3z M15 13h6v8h-6z', escalations: 'M12 2 2 20h20z M12 9v5 M12 17h.01', barcodes: 'M4 5v14 M7 5v14 M11 5v14 M14 5v14 M18 5v14 M21 5v14', reports: 'M4 20V10 M10 20V4 M16 20v-7 M22 20H2',
   roles: 'm12 2 9 4v6c0 5-9 10-9 10S3 17 3 12V6z', signins: 'M10 13a5 5 0 0 0 7 0l4-4a5 5 0 0 0-7-7l-2 2 M14 11a5 5 0 0 0-7 0l-4 4a5 5 0 0 0 7 7l2-2' };
 const icon = (id: string) => raw(`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[id] ?? ICONS.overview}"/></svg>`);
 const initials = (n: string) => n.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
@@ -271,7 +273,7 @@ function shell(content: Raw): string {
     <div class="crumbs">Kalyani Plant 1 / <b>${S.view === 'overview' ? 'Overview' : (ALL_ITEMS.find((i) => i.id === S.view)?.label ?? 'My account')}</b></div>
     <div class="who">
       <label class="actor"><span>Demo: switch person</span>
-        <select id="who" aria-label="Switch person (demo shortcut: signs in with the demo password)">${ORDER.filter((k) => K.world.actors[k]).map((k) => html`<option value="${k}" ${k === S.user ? raw('selected') : ''}>${PEOPLE[k].name} — ${PEOPLE[k].role.split(' · ')[0]}</option>`)}</select></label>
+        <select id="who" aria-label="Switch person (demo shortcut: signs in with the demo password)">${ORDER.filter((k) => K.world.actors[k]).map((k) => html`<option value="${k}" ${k === S.user ? raw('selected') : ''}>${PEOPLE[k].role.split(' · ')[0]} — ${PEOPLE[k].name}</option>`)}</select></label>
       <button class="ghost" data-view="account" title="My account" style="display:flex;align-items:center;gap:8px"><span class="avatar">${initials(me.name)}</span>${me.name}</button><button data-act="signout">Sign out</button>
     </div>
   </header>
@@ -311,7 +313,7 @@ async function computeVis() {
 const VIEWS: Record<View, () => Promise<Raw>> = {
   overview, po: poView, receiving: receivingView, quality: qualityView, stock: stockView, audit: auditView,
   employees: H.employeesView, attendance: H.attendanceView, leave: H.leaveView, payroll: H.payrollView,
-  owner: O.ownerView, escalations: O.escalationsView, reports: P.reportsView, users: A.usersView, roles: A.rolesView, signins: A.signinsView, account: A.accountView,
+  owner: O.ownerView, escalations: O.escalationsView, reports: P.reportsView, barcodes: B.barcodesView, users: A.usersView, roles: A.rolesView, signins: A.signinsView, account: A.accountView,
 };
 
 let queued = false;
@@ -367,6 +369,7 @@ document.addEventListener('click', async (ev) => {
   if (await H.onClick(t)) return;
   if (await O.onClick(t)) return;
   if (await P.onClick(t)) return;
+  if (await B.onClick(t)) return;
   const pp = t.closest('[data-pick-po]') as HTMLElement | null; if (pp) { S.poId = pp.dataset.pickPo!; return render(); }
   const pq = t.closest('[data-pick-qc]') as HTMLElement | null; if (pq) { S.inspId = pq.dataset.pickQc!; return render(); }
   const pl = t.closest('[data-pick-lot]') as HTMLElement | null; if (pl) { S.lotId = S.lotId === pl.dataset.pickLot ? '' : pl.dataset.pickLot!; return render(); }
@@ -413,6 +416,7 @@ document.addEventListener('submit', async (ev) => {
   if (await H.onSubmit(f.dataset.form!)) return;
   if (await O.onSubmit(f.dataset.form!)) return;
   if (await P.onSubmit(f.dataset.form!)) return;
+  if (await B.onSubmit(f.dataset.form!)) return;
   switch (f.dataset.form) {
     case 'newpo': {
       const partnerId = val('f-vendor'), itemId = val('f-item');

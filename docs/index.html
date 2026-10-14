@@ -357,6 +357,23 @@ table.mini th.r, table.mini td.r { text-align: right; font-variant-numeric: tabu
 @keyframes rise { from { transform: scaleY(0); } } .sp-ax { display: flex; justify-content: space-between; color: var(--muted); }
 .more summary { cursor: pointer; } .more summary small { color: var(--muted); } .more .primary { margin: 10px 0; }
 @media (prefers-reduced-motion: reduce) { .ring .seg, .pp, .sp i { animation: none; } }
+
+/* barcodes */
+.tabs { display: flex; gap: 6px; margin: 0 0 14px; } .tabs button, .seg2 button { padding: 7px 14px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); border-radius: 999px; cursor: pointer; } .tabs button.on, .seg2 button.on { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.seg2 { display: inline-flex; gap: 6px; margin-bottom: 10px; }
+.sc { grid-template-columns: minmax(280px, 420px) minmax(0, 1fr); align-items: start; } @media (max-width: 860px) { .sc { grid-template-columns: 1fr; } }
+.sc-form { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0; } .sc-form input { flex: 1 1 200px; min-width: 0; font-size: 16px; padding: 11px 12px; }
+.sc-steps { display: flex; gap: 8px; padding: 0; list-style: none; margin: 8px 0; font-size: 12.5px; } .sc-steps li { flex: 1; padding: 6px 10px; border-radius: 8px; background: var(--surface-2); color: var(--muted); } .sc-steps li.now { background: var(--accent-soft); color: var(--accent); font-weight: 600; } .sc-steps li.done { color: var(--ok); }
+.sc-q { display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); margin-bottom: 6px; }
+.sc-now { margin: 4px 0; font-size: 13px; } .sc-video { width: 100%; max-height: 220px; border-radius: 10px; background: #000; }
+.sc-log { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 4px; } .sc-log li { display: grid; padding: 7px 10px; border-radius: 8px; font-size: 12.5px; } .sc-log li.ok { background: var(--ok-soft); color: var(--ok); } .sc-log li.no { background: var(--bad-soft); color: var(--bad); } .sc-log small { opacity: .85; }
+.sc-barcode { display: grid; justify-items: start; gap: 4px; margin-bottom: 8px; } .sc-barcode svg { max-width: 100%; background: #fff; padding: 6px; border-radius: 6px; }
+.lb-ctl { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; } .lb-ctl label { display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.lb-pick { list-style: none; margin: 10px 0 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 4px 14px; max-height: 260px; overflow: auto; } .lb-pick small { color: var(--muted); }
+.label-sheet { display: flex; flex-wrap: wrap; gap: 8px; } .lbl { background: #fff; color: #000; border: 1px dashed #bbb; padding: 2mm 3mm; display: grid; gap: 1px; align-content: start; break-inside: avoid; overflow: hidden; font-family: Arial, sans-serif; }
+.lbl.small { width: 50mm; height: 25mm; font-size: 7pt; } .lbl.large { width: 100mm; height: 50mm; font-size: 12pt; padding: 4mm 5mm; }
+.lbl svg { width: 100%; height: auto; max-height: 10mm; } .lbl.large svg { max-height: 20mm; } .lb-top { display: flex; justify-content: space-between; gap: 6px; } .lb-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .lb-code { font-family: monospace; text-align: center; } .lb-qty { text-align: right; font-weight: bold; }
+@media print { body * { visibility: hidden !important; } .label-sheet, .label-sheet * { visibility: visible !important; } .label-sheet { position: absolute; left: 0; top: 0; gap: 2mm; } .lbl { border: 0; } .lbl.large { page-break-after: always; } @page { margin: 5mm; } }
 </style>
 
 <div id="app"></div>

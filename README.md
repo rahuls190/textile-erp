@@ -15,7 +15,7 @@ npm install
 npm run migrate                 # create the schema
 npm run seed:demo               # demo company, site, roles, users (password: Demo-Passw0rd!  — dev only)
 npm start                       # API on http://localhost:3000
-npm test                        # 110 tests, each file on a fresh database
+npm test                        # 116 tests, each file on a fresh database
 ```
 
 Try it: `POST /api/login` → use the token as `Authorization: Bearer …`. **Every write needs an `Idempotency-Key`
@@ -39,6 +39,7 @@ Demo logins use the password above; the login screen has one-click person chips.
 | **Owner desk**: one visual page, every process end to end (buying → receiving → quality → stock; people → attendance → leave → payroll), what is waiting and how long | ✅ |
 | **Escalation ladder** for urgent approvals: approver → senior management → owner. Urgent climbs by itself if nobody acts; critical goes straight to the owner; items that wait past their limit are raised automatically | ✅ |
 | **Owner override**: approve or reject any pending item (PO, stock adjustment, leave, salary, payroll) past the approver's limit and the separation-of-duties rule. A written reason is required, the record shows the owner decided, and it goes in an append-only log shown on the owner desk | ✅ |
+| **Barcodes**: Code 128 labels for every roll (its lot label, the same code on every reprint) and every shelf (`L:` + code), printable in two sizes. **Scan** a roll or shelf to see what and where it is (keyboard-style USB scanners, or the camera where the browser supports it). **Move forward**: scan the roll, then the next place; stock moves along Receiving → Store → Rack through the normal putaway rules, so held or rejected rolls are refused, backwards moves are refused, and each move is audited and leaves a balanced ledger entry | ✅ |
 | **Overview**: a short greeting, what is waiting for you, and animated charts (stock ring, order pipeline, quality pass rate, material received over 14 days, attendance today), each shown only if your role can see that data | ✅ |
 | **Reports**: 13 reports (purchase register, vendor performance, stock position, quality, approvals waiting, headcount, attendance, leave balances, payroll register, PF/ESI/tax summary, overrides & escalations, access review, audit activity). Each is shown only to roles holding its permission, limited to the person's sites in the query itself, with date/month/year filters, summary tiles, a bar chart, and CSV copy/download. **Every run is written to the audit log** (who, which report, filters, rows); payroll reports are marked sensitive | ✅ |
 | **AI custom reports**: describe a report in plain words ("net pay by department last month", "top 5 employees by late minutes this month"); the assistant turns it into a structured spec, shows how it read the request, and runs it. Specs can be saved, kept private or shared. **The AI never writes SQL**: it can only name the datasets and columns in a fixed catalogue (`src/domain/custom-reports.ts`), the dataset's permission and the person's site scope are enforced on every run, all values are query parameters, and each run is audited with the spec and the original question. A payroll-type request from someone without payroll rights is refused | ✅ |
@@ -83,6 +84,7 @@ are automated in `test/`.
 
 ## Not built yet
 
+Gate-in/out scanning, scanning for issue to production (needs F01–F08), cycle counts by scan, inter-site transfers (W05) ·
 P01 planning · P03 vendor portal · W05 transfers · W07 split/slit · W08 supplier return/debit · W09 dead stock ·
 J01–J03 subcontracting · F01–F08 production · S01–S03 sales · A01–A04 finance/GST/e-invoice/e-way bill ·
 recruitment/appraisal/loans, maintenance, scheduled or emailed reports, PDF/Excel export (CSV only), finance reports (need A01–A04) · **offline factory node + cloud sync** (the outbox and idempotency are the
