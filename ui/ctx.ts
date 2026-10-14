@@ -11,7 +11,7 @@ export const DEMO_PASSWORD = 'Demo-Passw0rd!';
 export type View =
   | 'overview' | 'po' | 'receiving' | 'quality' | 'stock'
   | 'employees' | 'attendance' | 'leave' | 'payroll'
-  | 'users' | 'roles' | 'audit' | 'signins' | 'account' | 'owner' | 'escalations';
+  | 'users' | 'roles' | 'audit' | 'signins' | 'account' | 'owner' | 'escalations' | 'reports';
 
 export const K = { world: null as unknown as World, pool: null as unknown as LitePool };
 export const R = { render: async () => {}, scheduleRender: () => {} };
@@ -25,6 +25,8 @@ export const S = {
   userSel: '', roleSel: '', roleDraft: null as null | Set<string>,
   // owner desk: the demo clock can be moved forward to watch escalations climb the ladder
   skewHours: 0, ovr: '' as string, escFor: '' as string,
+  // reports
+  rep: '' as string, repP: {} as Record<string, string>,
 };
 
 export const $ = (s: string) => document.querySelector(s) as HTMLElement;

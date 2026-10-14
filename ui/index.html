@@ -300,6 +300,29 @@ html[data-density="compact"] .kv { padding: 3px 0; } html[data-density="compact"
 .esc2 details { margin-top: 4px; font-size: 12.5px; } .esc2 summary { cursor: pointer; color: var(--accent); }
 .timeline li { padding-left: 14px; border-left: 3px solid var(--line); } .timeline small { display: block; color: var(--muted); }
 @media (max-width: 1020px) { .needs { grid-template-columns: repeat(2, minmax(0, 1fr)); } .flow, .flow.people { grid-template-columns: minmax(0, 1fr); gap: 8px; } .arrow { display: none; } .owner2 { grid-template-columns: minmax(0, 1fr); } }
+
+/* reports */
+.rp { grid-template-columns: minmax(240px, 320px) minmax(0, 1fr); align-items: start; }
+.rp h3 { margin: 14px 0 6px; font-size: 11.5px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.rp h3:first-child { margin-top: 0; }
+.rp-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.rp-item { width: 100%; text-align: left; display: grid; gap: 3px; padding: 9px 11px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--fg); cursor: pointer; }
+.rp-item .chip { justify-self: start; }
+.rp-item small { color: var(--muted); font-size: 12px; line-height: 1.35; }
+.rp-item.on { border-color: var(--accent); background: var(--accent-soft, var(--surface-2)); }
+.rp-form { display: flex; flex-wrap: wrap; gap: 12px; align-items: end; margin: 12px 0 16px; }
+.rp-form label { display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); }
+.rp-warn { margin: 8px 0 0; padding: 7px 10px; border-radius: 8px; background: var(--warn-soft); color: var(--warn); font-size: 12.5px; }
+.rp-sum { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin: 6px 0 14px; }
+.rp-tile { border: 1px solid var(--line); border-radius: 10px; padding: 9px 12px; display: grid; gap: 2px; background: var(--surface-2); }
+.rp-tile span { font-size: 11.5px; color: var(--muted); } .rp-tile b { font-size: 19px; }
+.rp-chart { margin: 4px 0 14px; display: grid; gap: 5px; } .rp-chart h3 { margin: 0 0 4px; }
+.rp-bar { display: grid; grid-template-columns: minmax(70px, 160px) 1fr auto; gap: 8px; align-items: center; font-size: 12.5px; }
+.rp-l { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.rp-t { background: var(--surface-2); border-radius: 6px; height: 10px; overflow: hidden; } .rp-t i { display: block; height: 100%; background: var(--accent); border-radius: 6px; }
+.rp-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 10px; } .rp-actions small { color: var(--muted); margin-left: auto; }
+table.mini th.r, table.mini td.r { text-align: right; font-variant-numeric: tabular-nums; }
+@media (max-width: 860px) { .rp { grid-template-columns: 1fr; } }
 </style>
 
 <div id="app"></div>

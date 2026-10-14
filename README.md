@@ -15,7 +15,7 @@ npm install
 npm run migrate                 # create the schema
 npm run seed:demo               # demo company, site, roles, users (password: Demo-Passw0rd!  — dev only)
 npm start                       # API on http://localhost:3000
-npm test                        # 92 tests, each file on a fresh database
+npm test                        # 100 tests, each file on a fresh database
 ```
 
 Try it: `POST /api/login` → use the token as `Authorization: Bearer …`. **Every write needs an `Idempotency-Key`
@@ -39,6 +39,7 @@ Demo logins use the password above; the login screen has one-click person chips.
 | **Owner desk**: one visual page, every process end to end (buying → receiving → quality → stock; people → attendance → leave → payroll), what is waiting and how long | ✅ |
 | **Escalation ladder** for urgent approvals: approver → senior management → owner. Urgent climbs by itself if nobody acts; critical goes straight to the owner; items that wait past their limit are raised automatically | ✅ |
 | **Owner override**: approve or reject any pending item (PO, stock adjustment, leave, salary, payroll) past the approver's limit and the separation-of-duties rule. A written reason is required, the record shows the owner decided, and it goes in an append-only log shown on the owner desk | ✅ |
+| **Reports**: 13 reports (purchase register, vendor performance, stock position, quality, approvals waiting, headcount, attendance, leave balances, payroll register, PF/ESI/tax summary, overrides & escalations, access review, audit activity). Each is shown only to roles holding its permission, limited to the person's sites in the query itself, with date/month/year filters, summary tiles, a bar chart, and CSV copy/download. **Every run is written to the audit log** (who, which report, filters, rows); payroll reports are marked sensitive | ✅ |
 | Guards: no self-access changes, never remove the last administrator; the admin role keeps user, role and access management and cannot be deleted | ✅ |
 | HR: employee register (site-scoped, bank masked), departments, designations, shifts, holidays | ✅ |
 | Attendance (P/A/H/L/LWP/WO/HOL, late/overtime from the shift), locked once payroll is approved | ✅ |
@@ -80,7 +81,7 @@ are automated in `test/`.
 
 P01 planning · P03 vendor portal · W05 transfers · W07 split/slit · W08 supplier return/debit · W09 dead stock ·
 J01–J03 subcontracting · F01–F08 production · S01–S03 sales · A01–A04 finance/GST/e-invoice/e-way bill ·
-recruitment/appraisal/loans, maintenance, reports · **offline factory node + cloud sync** (the outbox and idempotency are the
+recruitment/appraisal/loans, maintenance, scheduled or emailed reports, PDF/Excel export (CSV only), finance reports (need A01–A04) · **offline factory node + cloud sync** (the outbox and idempotency are the
 foundation for it) · data migration tooling. (The browser demo is a prototype interface; a production front end is not built.)
 
 ## Decisions I made (change any of them)

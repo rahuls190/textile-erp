@@ -6,6 +6,7 @@ import { actorFromToken, login, logout, changeOwnPassword } from './core/auth.js
 import { runCommand, type Actor, type Ctx } from './core/command.js';
 import { AppError, badRequest, forbidden, unauthorized } from './core/errors.js';
 import * as owner from './domain/owner.js';
+import * as reports from './domain/reports.js';
 import * as prefs from './domain/prefs.js';
 import * as admin from './domain/admin.js';
 import * as masters from './domain/masters.js';
@@ -84,6 +85,10 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
   app.get('/api/me/preferences', read((db, a) => prefs.getPreferences(db, a.id)));
   cmd('/api/me/preferences', 'user.preferences', z.object({ theme: z.string().optional(), accent: z.string().optional(), layout: z.string().optional(), density: z.string().optional(), reset: z.boolean().optional() }),
     (c, b) => prefs.setPreferences(c, b.reset ? { reset: true } : (b as never)));
+  // ── reports (read-only; each run is audited) ──
+  app.get('/api/reports', read((db, a) => reports.listReports(db, a.id)));
+  app.get('/api/reports/runs', read(async (db, a) => { const r = await reports.recentRuns(db, a.id); if (!r) throw forbidden('Not permitted: audit.view'); return r; }));
+  app.get('/api/reports/:key', read((db, a, req) => reports.runReport(db, a, (req.params as { key: string }).key, req.query as Record<string, string>)));
   // ── owner desk, escalation ladder, override ──
   const itemType = z.enum(['purchase_order', 'stock_adjustment', 'leave_request', 'salary_structure', 'payroll_run']);
   app.get('/api/owner', read(async (db, a) => { const d = await owner.ownerDashboard(db, a.id); if (!d) throw forbidden('Not permitted: owner.view'); return d; }));
