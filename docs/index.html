@@ -441,6 +441,21 @@ form.form textarea, .form textarea { width: 100%; font: inherit; padding: 8px 10
 .addr{display:flex;gap:.6rem;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;padding:.55rem .7rem;border:1px solid var(--line,#e5ddd2);border-radius:10px;margin-bottom:.4rem}
 .addr>div:first-child{min-width:0;flex:1 1 200px}.addr .row{flex-wrap:wrap}
 label.chk{display:flex;align-items:center;gap:.5rem;flex-direction:row}label.chk input{width:auto}
+
+/* barcode studio */
+.tilebtn { all: unset; box-sizing: border-box; cursor: pointer; display: grid; gap: 2px; padding: 4px 6px; border-radius: 8px; } .tilebtn:hover, .tilebtn.on { background: var(--surface-2); } .tilebtn small { color: var(--muted); font-size: 11px; }
+tr.dim td { opacity: .55; } tr.sel td { background: rgba(110,70,170,.08); } .muted-h { margin: 12px 0 4px; font-size: 11px; text-transform: uppercase; letter-spacing: 1.2px; color: var(--muted); }
+.lb-prev { margin: 10px 0; display: grid; gap: 6px; justify-items: start; } .lb-prev svg.lbl-svg, .lb-stage > svg.lbl-svg { background: #fff; border: 1px solid var(--line); border-radius: 4px; max-width: 100%; height: auto; }
+.lb-stage { overflow: auto; padding: 10px; background: var(--surface-2); border-radius: 10px; margin: 8px 0 4px; } .lb-stage > svg.lbl-svg { width: min(100%, 560px); height: auto; touch-action: none; display: block; } .el-hit { cursor: move; }
+input.nm { width: 64px; padding: 5px 6px; } .split.lay { grid-template-columns: minmax(190px, 250px) minmax(0, 1fr); } .lay td select, .lay td input:not(.nm):not([type=checkbox]) { min-width: 110px; width: auto; } .lay td .chk { white-space: nowrap; margin-top: 4px; } .lay button.link.on { font-weight: 700; color: var(--accent); } .ok-t { color: var(--ok, #1d7a4a); }
+.label-sheet2 { display: none; }
+@media print {
+  .label-sheet2.printing { display: grid !important; position: absolute; left: 0; top: 0; gap: var(--gap, 2mm); }
+  .label-sheet2.printing * { visibility: visible !important; }
+  .label-sheet2.single { grid-template-columns: var(--lw); gap: 0; } .label-sheet2.single .lbl-cell { width: var(--lw); height: var(--lh); page-break-after: always; break-after: page; overflow: hidden; }
+  .label-sheet2.multi { grid-template-columns: repeat(var(--cols), var(--lw)); } .label-sheet2.multi .lbl-cell { width: var(--lw); height: var(--lh); break-inside: avoid; }
+  .lbl-svg { display: block; }
+}
 </style>
 
 <div id="app"></div>

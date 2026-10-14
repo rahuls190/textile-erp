@@ -7,10 +7,10 @@ import type { Pool } from '../db/pool.js';
  */
 export const ROLES: Record<string, { description: string; perms: string[] }> = {
   ADM: { description: 'System / access administrator (no business approval power)',
-         perms: ['user.manage', 'user.view', 'access.assign', 'role.manage', 'site.provision', 'audit.view', 'ai.manage'] },
+         perms: ['user.manage', 'user.view', 'access.assign', 'role.manage', 'site.provision', 'audit.view', 'ai.manage', 'barcode.view', 'barcode.layout', 'barcode.series'] },
   MD: { description: 'Master-data steward / managing director',
         perms: ['org.create', 'org.edit', 'unit.create', 'item.create', 'item.edit', 'item.submit', 'item.view',
-                'partner.create', 'partner.submit', 'partner.view', 'partner.edit', 'mtype.manage', 'inventory.view', 'po.view', 'hr.salary.propose', 'hr.salary.approve', 'escalation.raise', 'escalation.senior', 'escalation.view'] },
+                'partner.create', 'partner.submit', 'partner.view', 'partner.edit', 'mtype.manage', 'barcode.view', 'barcode.issue', 'barcode.print', 'barcode.layout', 'barcode.series', 'inventory.view', 'po.view', 'hr.salary.propose', 'hr.salary.approve', 'escalation.raise', 'escalation.senior', 'escalation.view'] },
   ENG: { description: 'Engineer / technical approver',
          perms: ['item.create', 'item.edit', 'item.submit', 'item.approve', 'item.deactivate', 'item.view', 'inventory.view', 'partner.view'] },
   BUY: { description: 'Buyer',
@@ -20,10 +20,10 @@ export const ROLES: Record<string, { description: string; perms: string[] }> = {
          perms: ['po.approve~', 'po.release~', 'po.cancel~', 'po.view', 'partner.trade.approve', 'partner.view', 'partner.suspend',
                  'rate.approve', 'item.view'] },
   STO: { description: 'Storekeeper',
-         perms: ['receipt.post', 'receipt.view', 'putaway.execute', 'reservation.allocate', 'inventory.view',
+         perms: ['receipt.post', 'receipt.view', 'putaway.execute', 'reservation.allocate', 'inventory.view', 'barcode.view', 'barcode.issue', 'barcode.print',
                  'item.view', 'po.view', 'qc.view', 'dispatch.post', 'so.view'] },
   INV: { description: 'Inventory controller',
-         perms: ['receipt.exception.approve', 'adjustment.propose', 'adjustment.approve~', 'adjustment.post',
+         perms: ['receipt.exception.approve', 'adjustment.propose', 'adjustment.approve~', 'adjustment.post', 'barcode.view', 'barcode.issue', 'barcode.print', 'barcode.void',
                  'reservation.allocate', 'reservation.override.approve', 'location.configure', 'inventory.view',
                  'receipt.view', 'qc.view', 'item.view', 'po.view'] },
   QCI: { description: 'Quality inspector',
@@ -44,7 +44,7 @@ export const ROLES: Record<string, { description: string; perms: string[] }> = {
   HRE: { description: 'HR executive (no salary access)',
          perms: ['hr.employee.view', 'hr.employee.create', 'hr.employee.edit', 'hr.attendance.view', 'hr.attendance.mark', 'hr.leave.view'] },
   OWN: { description: 'Business owner (sees everything, can override approvals)',
-         perms: ['ai.manage', 'owner.view', 'owner.override', 'escalation.raise', 'escalation.senior', 'escalation.view', 'audit.view', 'user.view',
+         perms: ['ai.manage', 'barcode.view', 'owner.view', 'owner.override', 'escalation.raise', 'escalation.senior', 'escalation.view', 'audit.view', 'user.view',
                  'inventory.view', 'po.view', 'item.view', 'partner.view', 'receipt.view', 'qc.view',
                  'hr.employee.view', 'hr.attendance.view', 'hr.leave.view', 'hr.payroll.view', 'hr.salary.view', 'crm.view', 'sales.view', 'so.view'] },
   SAL: { description: 'Sales executive',
@@ -65,7 +65,7 @@ for (const [k, def] of Object.entries(ROLES)) {
 export const AREAS: Record<string, string> = {
   user: 'Users', access: 'Access', role: 'Roles', site: 'Sites', audit: 'Audit', org: 'Organisation', unit: 'Units', item: 'Items',
   partner: 'Vendors & clients', mtype: 'Material types', rate: 'Rates', po: 'Purchase orders', receipt: 'Receiving', qc: 'Quality', putaway: 'Putaway',
-  owner: 'Owner', ai: 'AI models & assistant', crm: 'CRM', sales: 'Sales', quote: 'Quotations', so: 'Sales orders', customer: 'Customers', dispatch: 'Dispatch', escalation: 'Escalations', reservation: 'Reservations', adjustment: 'Adjustments', location: 'Locations', inventory: 'Inventory', hr: 'HR & payroll',
+  owner: 'Owner', barcode: 'Barcodes & labels', ai: 'AI models & assistant', crm: 'CRM', sales: 'Sales', quote: 'Quotations', so: 'Sales orders', customer: 'Customers', dispatch: 'Dispatch', escalation: 'Escalations', reservation: 'Reservations', adjustment: 'Adjustments', location: 'Locations', inventory: 'Inventory', hr: 'HR & payroll',
 };
 
 /** Every known permission, derived from the role catalogue (plus anything the console adds later). */

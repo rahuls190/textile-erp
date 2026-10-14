@@ -37,6 +37,14 @@ export async function resolveScan(db: Db, userId: string, raw: string) {
   if (!code) throw badRequest('Nothing was scanned');
   const sites = await visibleSites(db, userId, 'inventory.view');
   if (sites && !sites.length) throw notFound('Code');
+  const reg = (await db.query(`SELECT b.status, b.entity_type, b.entity_id, b.void_reason, b.note, s.name AS series FROM barcode b LEFT JOIN barcode_series s ON s.id=b.series_id WHERE b.code=$1`, [code])).rows[0];
+  if (reg?.status === 'void') throw conflict('CODE_CANCELLED', `This code was cancelled${reg.void_reason ? ' (' + reg.void_reason + ')' : ''}. Do not use this label.`);
+  if (reg && !reg.entity_id && ['lot', 'item', 'location', 'employee'].includes(reg.entity_type)) throw conflict('CODE_UNASSIGNED', `This ${reg.entity_type} code is valid but not attached to anything yet. Attach it first.`);
+  if (reg && ['carton', 'asset', 'generic'].includes(reg.entity_type)) return { type: 'standalone' as const, code, kind: reg.entity_type as string, note: reg.note as string | null, series: reg.series as string | null };
+  if (reg?.entity_id && ['lot', 'location'].includes(reg.entity_type)) {
+    const own = (await db.query(reg.entity_type === 'lot' ? 'SELECT label AS c FROM lot WHERE id=$1' : `SELECT 'L:' || code AS c FROM location WHERE id=$1`, [reg.entity_id])).rows[0]?.c;
+    if (own && own !== code) return resolveScan(db, userId, own); // a spare code attached to a roll or shelf reads as that roll or shelf
+  }
   const scope = '($2::uuid[] IS NULL OR %s = ANY($2::uuid[]))';
   if (code.startsWith(LOC_PREFIX)) {
     const loc = (await db.query(`SELECT l.id, l.code, l.name, l.kind, l.site_id FROM location l WHERE l.code = $1 AND ${scope.replace('%s', 'l.site_id')} LIMIT 1`, [code.slice(LOC_PREFIX.length), sites])).rows[0];

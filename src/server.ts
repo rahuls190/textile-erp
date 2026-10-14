@@ -10,6 +10,7 @@ import * as reports from './domain/reports.js';
 import * as custom from './domain/custom-reports.js';
 import * as ai from './domain/ai.js';
 import * as barcode from './domain/barcode.js';
+import * as bcs from './domain/barcodes.js';
 import * as sales from './domain/sales.js';
 import * as prefs from './domain/prefs.js';
 import * as admin from './domain/admin.js';
@@ -153,6 +154,22 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
   // ── barcodes: read a scanned code, list labels to print, move a roll forward ──
   app.get('/api/scan', read((db, a, req) => barcode.resolveScan(db, a.id, String((req.query as { code?: string }).code ?? ''))));
   app.get('/api/labels', read((db, a) => barcode.labelData(db, a.id)));
+  // barcode registry, layouts and print log
+  app.get('/api/barcodes', read((db, a, r) => bcs.registry(db, a.id, { q: qs(r).q, type: qs(r).type, status: qs(r).status, unused: qs(r).unused === '1', limit: Number(qs(r).limit) || undefined, offset: Number(qs(r).offset) || undefined })));
+  app.get('/api/barcodes/series', read((db, a) => bcs.listSeries(db, a.id)));
+  app.get('/api/barcodes/layouts', read((db, a, r) => bcs.listLayouts(db, a.id, qs(r).type)));
+  app.get('/api/barcodes/:id/prints', read((db, a, r) => bcs.printHistory(db, a.id, (r.params as { id: string }).id)));
+  cmd('/api/barcodes/series', 'barcode.series', z.object({ name: z.string(), entityType: z.string(), prefix: z.string(), digits: z.number().int().optional(), symbology: z.string().optional() }), (c, b) => bcs.createSeries(c, b as never), true);
+  cmd('/api/barcodes/issue', 'barcode.issue', z.object({ seriesId: id, count: z.number().int(), siteId: id.nullable().optional(), note: z.string().optional() }), (c, b) => bcs.issueCodes(c, b), true);
+  cmd('/api/barcodes/assign', 'barcode.issue', z.object({ code: z.string(), entityId: id }), (c, b) => bcs.assignCode(c, b));
+  cmd('/api/barcodes/:id/void', 'barcode.void', z.object({ reason: z.string() }), (c, b, p) => bcs.voidCode(c, { id: p.id, reason: b.reason }));
+  cmd('/api/barcodes/:id/note', 'barcode.issue', z.object({ note: z.string() }), (c, b, p) => bcs.updateNote(c, { id: p.id, note: b.note }));
+  cmd('/api/barcodes/layouts', 'barcode.layout', z.object({ entityType: z.string(), name: z.string(), widthMm: z.number(), heightMm: z.number(), columns: z.number().int().optional(), gapMm: z.number().optional(), elements: z.array(z.object({ type: z.enum(['field', 'text', 'barcode', 'qr', 'line']), x: z.number(), y: z.number(), w: z.number(), h: z.number(), field: z.string().optional(), text: z.string().optional(), size: z.number().optional(), bold: z.boolean().optional(), align: z.enum(['left', 'center', 'right']).optional() })), makeDefault: z.boolean().optional() }), (c, b) => bcs.saveLayout(c, b as never), true);
+  cmd('/api/barcodes/layouts/:id/update', 'barcode.layout', z.object({ entityType: z.string(), name: z.string(), widthMm: z.number(), heightMm: z.number(), columns: z.number().int().optional(), gapMm: z.number().optional(), elements: z.array(z.object({ type: z.enum(['field', 'text', 'barcode', 'qr', 'line']), x: z.number(), y: z.number(), w: z.number(), h: z.number(), field: z.string().optional(), text: z.string().optional(), size: z.number().optional(), bold: z.boolean().optional(), align: z.enum(['left', 'center', 'right']).optional() })), makeDefault: z.boolean().optional(), expectedVersion: z.number().int().optional() }), (c, b, p) => bcs.saveLayout(c, { ...b, id: p.id } as never));
+  cmd('/api/barcodes/layouts/:id/default', 'barcode.layout', none, (c, _b, p) => bcs.setDefaultLayout(c, { id: p.id }));
+  cmd('/api/barcodes/layouts/:id/remove', 'barcode.layout', none, (c, _b, p) => bcs.removeLayout(c, { id: p.id }));
+  app.post('/api/barcodes/labels', read((db, a, r) => { const b = r.body as { ids: string[]; layoutId: string }; return bcs.labelValues(db, a.id, b.ids ?? [], b.layoutId); }));
+  cmd('/api/barcodes/print', 'barcode.print', z.object({ ids: z.array(id), layoutId: id, copies: z.number().int().optional(), reason: z.string().optional() }), (c, b) => bcs.recordPrint(c, { barcodeIds: b.ids, layoutId: b.layoutId, copies: b.copies, reason: b.reason }));
   cmd('/api/stock/forward', 'inventory.forward', z.object({ lotCode: z.string().min(1), toLocationCode: z.string().min(1), qty: z.string().optional() }), (c, b) => barcode.moveForward(c, b));
   // ── reports (read-only; each run is audited) ──
   app.get('/api/reports', read((db, a) => reports.listReports(db, a.id)));

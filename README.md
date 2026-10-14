@@ -15,7 +15,7 @@ npm install
 npm run migrate                 # create the schema
 npm run seed:demo               # demo company, site, roles, users (password: Demo-Passw0rd!  — dev only)
 npm start                       # API on http://localhost:3000
-npm test                        # 162 tests, each file on a fresh database
+npm test                        # 173 tests, each file on a fresh database
 ```
 
 Try it: `POST /api/login` → use the token as `Authorization: Bearer …`. **Every write needs an `Idempotency-Key`
@@ -78,6 +78,7 @@ The escalation time limits (24 h for orders, adjustments and leave; 72 h salary;
 | W06 adjustments: propose → independent approve (band) → post; never type over a balance | ◐ (no count workflow) |
 | **CRM + sales**: leads → follow-ups → quotation (max 10% discount without extra right, 15-day validity) → order (banded approval, creator ≠ approver, credit-limit check) → stock hold → dispatch by storekeeper (immutable dispatch note, consumes the hold, posts the stock ledger) | ✅ (no invoice or payment yet) |
 | **Master data**: material types (what each type must record, code letters, tracking), materials with HSN / GST / reorder level and type-driven attributes (draft → independent approval, switch off only when nothing uses it), vendors and clients with GSTIN/PAN checks, contacts, billing and shipping addresses (same-as-billing, a default per type, full list of 36 states and territories), payment days, suspend/reactivate (bank or GSTIN change sends an approved party back for checking), vendor price lists, units, and all-or-nothing CSV bulk add | ✅ |
+| **Barcode registry and label designer**: every code is a row with its own id and a unique code that is never reused (rolls, shelves, materials and staff are registered automatically; cartons, assets and spare roll labels are issued in numbered series, safe when many people issue at once). Attach a spare code to a roll, cancel a code with a reason, see what it is stuck on. Label layouts in millimetres with Code 128 and QR, drag-to-move designer, default layout per kind, sheet or label-printer output. Every print and reprint is logged (a reprint needs a reason) | ✅ |
 | **AI model registry** (owner/administrator only): add, edit, remove providers (Anthropic, OpenAI, Google, any OpenAI-compatible endpoint) and models, store API keys sealed with AES-GCM (only last 4 shown, never returned or audited), assign a primary and fallback model per job (assistant, reports), test a model, append-only call log | ✅ |
 | **AI assistant** with voice: floating helper that answers from the user's own permissions, opens screens, and prepares changes (leads, vendors, etc.) that only run after the user says yes (button or voice). Uses the assigned model, or a built-in reader when none is set | ✅ |
 | REST API + validation, clean errors, reads filtered by site scope | ✅ |

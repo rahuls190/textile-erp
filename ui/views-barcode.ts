@@ -4,9 +4,10 @@ import * as bc from '../src/domain/barcode.js';
 import { can } from '../src/core/permissions.js';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 import JsBarcode from 'jsbarcode';
+import * as LS from './views-labels.js';
 
 type Labels = Awaited<ReturnType<typeof bc.labelData>>;
-let tab: 'scan' | 'labels' = 'scan';
+let tab: 'scan' | 'codes' | 'issue' | 'layouts' | 'labels' = 'scan';
 let mode: 'lookup' | 'move' = 'lookup';
 let found: Awaited<ReturnType<typeof bc.resolveScan>> | null = null;
 let mvLot: { label: string; item: string } | null = null;
@@ -31,6 +32,7 @@ function foundCard(): Raw {
       ${f.where.length ? html`<table class="mini"><thead><tr><th>Where</th><th>State</th><th class="r">Quantity</th></tr></thead><tbody>${f.where.map(place)}</tbody></table>` : html`<p class="empty">No stock on this roll.</p>`}
       <div class="rp-sum"><div class="rp-tile"><span>Free to use</span><b>${qty(f.availability.available)}</b></div><div class="rp-tile"><span>Reserved</span><b>${qty(f.availability.reserved)}</b></div></div></div>`;
   }
+  if (found.type === 'standalone') return html`<div class="sc-card"><p><b>${found.code}</b> <span class="chip neutral">${found.kind}</span></p><p>${found.note ?? 'No note.'}</p><small>${found.series ? 'Series: ' + found.series + '. ' : ''}This code stands on its own and is in the registry.</small></div>`;
   const f = found;
   return html`<div class="sc-card"><p><b>${f.location.code}</b> · ${f.location.name} <span class="chip neutral">${f.location.kind.toLowerCase()}</span></p>
     ${f.lots.length ? html`<table class="mini"><thead><tr><th>Roll</th><th>Item</th><th>State</th><th class="r">Quantity</th></tr></thead><tbody>${f.lots.map((l) => html`<tr><td>${l.label}</td><td>${l.item_code}</td><td>${l.status.toLowerCase()}</td><td class="r">${qty(l.qty)}</td></tr>`)}</tbody></table>` : html`<p class="empty">Nothing is stored here.</p>`}</div>`;
@@ -40,7 +42,8 @@ export async function barcodesView(): Promise<Raw> {
   const d = await read(async (db) => ({ ok: await can(db, uid(), 'inventory.view', { anySite: true }), move: await can(db, uid(), 'putaway.execute', { anySite: true }), labels: tab === 'labels' ? await bc.labelData(db, uid()) : null }));
   if (!d.ok) return denied('Scan and labels', 'Barcodes for rolls and shelves.', 'Your role cannot see stock.');
   const camOk = typeof (window as unknown as { BarcodeDetector?: unknown }).BarcodeDetector !== 'undefined' && !!navigator.mediaDevices?.getUserMedia;
-  const tabs = html`<div class="tabs"><button class="${tab === 'scan' ? 'on' : ''}" data-act="bc-tab" data-id="scan">Scan</button><button class="${tab === 'labels' ? 'on' : ''}" data-act="bc-tab" data-id="labels">Print labels</button></div>`;
+  const tabs = html`<div class="tabs"><button class="${tab === 'scan' ? 'on' : ''}" data-act="bc-tab" data-id="scan">Scan</button><button class="${tab === 'codes' ? 'on' : ''}" data-act="bc-tab" data-id="codes">Codes</button><button class="${tab === 'issue' ? 'on' : ''}" data-act="bc-tab" data-id="issue">Issue and print</button><button class="${tab === 'layouts' ? 'on' : ''}" data-act="bc-tab" data-id="layouts">Label designer</button><button class="${tab === 'labels' ? 'on' : ''}" data-act="bc-tab" data-id="labels">Quick print</button></div>`;
+  if (tab === 'codes' || tab === 'issue' || tab === 'layouts') return LS.view(tab, tabs);
   if (tab === 'scan') {
     const step = mode === 'move' ? (mvLot ? 2 : 1) : 0;
     return html`${head('Scan and labels', 'Read a roll or a shelf, or move stock forward by scanning the roll and then the next place.')}${tabs}
@@ -121,6 +124,7 @@ async function startCamera() {
 }
 
 export async function onClick(t: HTMLElement): Promise<boolean> {
+  if (await LS.onClick(t)) return true;
   const b = t.closest('[data-act]') as HTMLElement | null; if (!b) return false;
   const id = b.dataset.id ?? '';
   switch (b.dataset.act) {
@@ -148,7 +152,8 @@ document.addEventListener('change', (ev) => {
   if (t.id === 'lb-copies') { copies = Math.min(10, Math.max(1, Number((t as HTMLInputElement).value) || 1)); void R.render(); }
 });
 
-export async function onSubmit(form: string): Promise<boolean> {
+export async function onSubmit(form: string, ev?: Event): Promise<boolean> {
+  if (await LS.onSubmit(form, ev)) return true;
   if (form !== 'scan') return false;
   const inp = document.getElementById('sc-in') as HTMLInputElement; const code = inp.value; inp.value = '';
   await handleScan(code); focusScan(); return true;

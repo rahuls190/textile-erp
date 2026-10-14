@@ -446,7 +446,7 @@ document.addEventListener('submit', async (ev) => {
   if (await H.onSubmit(f.dataset.form!)) return;
   if (await O.onSubmit(f.dataset.form!)) return;
   if (await P.onSubmit(f.dataset.form!)) return;
-  if (await B.onSubmit(f.dataset.form!)) return;
+  if (await B.onSubmit(f.dataset.form!, ev)) return;
   if (await SL.onSubmit(f.dataset.form!, f)) return;
   if (await MX.onSubmit(f.dataset.form!, f, ev as SubmitEvent)) return;
   if (await AI.onSubmit(f.dataset.form!, f)) return;
