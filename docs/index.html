@@ -323,6 +323,14 @@ html[data-density="compact"] .kv { padding: 3px 0; } html[data-density="compact"
 .rp-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 10px; } .rp-actions small { color: var(--muted); margin-left: auto; }
 table.mini th.r, table.mini td.r { text-align: right; font-variant-numeric: tabular-nums; }
 @media (max-width: 860px) { .rp { grid-template-columns: 1fr; } }
+
+.ai { margin-bottom: 14px; } .ai-form { display: flex; flex-wrap: wrap; gap: 8px; margin: 10px 0 8px; } .ai-form input { flex: 1 1 320px; min-width: 0; }
+.ai-ex { display: flex; flex-wrap: wrap; gap: 6px; } .ai-ex .chip { cursor: pointer; border: 0; text-transform: none; }
+.ai-read { border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 10px; padding: 10px 12px; margin: 10px 0 12px; background: var(--surface-2); }
+.ai-read ul { margin: 6px 0 4px; padding-left: 18px; font-size: 13px; } .ai-read small { color: var(--muted); }
+.rp-save { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--line); } .rp-save input[type=text], .rp-save input:not([type]) { flex: 1 1 200px; min-width: 0; }
+.label.inl, .inl { display: inline-flex; gap: 6px; align-items: center; font-size: 12.5px; color: var(--muted); }
+.rp-sv { display: flex; gap: 6px; align-items: stretch; } .rp-sv .rp-item { flex: 1; min-width: 0; } .rp-x { padding: 0 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--muted); cursor: pointer; font-size: 18px; }
 </style>
 
 <div id="app"></div>

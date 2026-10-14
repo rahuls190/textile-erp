@@ -7,6 +7,8 @@ import { runCommand, type Actor, type Ctx } from './core/command.js';
 import { AppError, badRequest, forbidden, unauthorized } from './core/errors.js';
 import * as owner from './domain/owner.js';
 import * as reports from './domain/reports.js';
+import * as custom from './domain/custom-reports.js';
+import * as ai from './domain/ai.js';
 import * as prefs from './domain/prefs.js';
 import * as admin from './domain/admin.js';
 import * as masters from './domain/masters.js';
@@ -88,6 +90,19 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
   // ── reports (read-only; each run is audited) ──
   app.get('/api/reports', read((db, a) => reports.listReports(db, a.id)));
   app.get('/api/reports/runs', read(async (db, a) => { const r = await reports.recentRuns(db, a.id); if (!r) throw forbidden('Not permitted: audit.view'); return r; }));
+  const aiProvider = process.env.ANTHROPIC_API_KEY ? ai.anthropicProvider(process.env.ANTHROPIC_API_KEY) : undefined;
+  app.get('/api/reports/datasets', read(async (db, a) => custom.catalogue(await custom.availableDatasets(db, a.id))));
+  app.get('/api/reports/custom', read((db, a) => custom.listSaved(db, a.id)));
+  app.get('/api/reports/custom/:id/run', read((db, a, req) => custom.runSaved(db, a, (req.params as { id: string }).id)));
+  // Describe a report in words; the assistant returns a spec and the report is run as the caller (audited, same rights as any report)
+  app.post('/api/reports/ask', read(async (db, a, req) => {
+    const b = z.object({ question: z.string().max(400) }).parse(req.body ?? {});
+    const it = await ai.interpret(db, a.id, b.question, aiProvider);
+    return { ...it, result: await custom.runCustom(db, a, it.spec, it.source === 'ai' ? 'ai' : 'manual', b.question) };
+  }));
+  app.post('/api/reports/custom/run', read((db, a, req) => custom.runCustom(db, a, (req.body as { spec?: unknown } | undefined)?.spec)));
+  cmd('/api/reports/custom', 'report.save', z.object({ name: z.string(), spec: z.unknown(), shared: z.boolean().optional(), question: z.string().optional() }), (c, b) => custom.saveCustom(c, b), true);
+  cmd('/api/reports/custom/:id/delete', 'report.delete', none, (c, _b, p) => custom.deleteSaved(c, { id: p.id }));
   app.get('/api/reports/:key', read((db, a, req) => reports.runReport(db, a, (req.params as { key: string }).key, req.query as Record<string, string>)));
   // ── owner desk, escalation ladder, override ──
   const itemType = z.enum(['purchase_order', 'stock_adjustment', 'leave_request', 'salary_structure', 'payroll_run']);

@@ -15,7 +15,7 @@ npm install
 npm run migrate                 # create the schema
 npm run seed:demo               # demo company, site, roles, users (password: Demo-Passw0rd!  — dev only)
 npm start                       # API on http://localhost:3000
-npm test                        # 100 tests, each file on a fresh database
+npm test                        # 110 tests, each file on a fresh database
 ```
 
 Try it: `POST /api/login` → use the token as `Authorization: Bearer …`. **Every write needs an `Idempotency-Key`
@@ -40,6 +40,7 @@ Demo logins use the password above; the login screen has one-click person chips.
 | **Escalation ladder** for urgent approvals: approver → senior management → owner. Urgent climbs by itself if nobody acts; critical goes straight to the owner; items that wait past their limit are raised automatically | ✅ |
 | **Owner override**: approve or reject any pending item (PO, stock adjustment, leave, salary, payroll) past the approver's limit and the separation-of-duties rule. A written reason is required, the record shows the owner decided, and it goes in an append-only log shown on the owner desk | ✅ |
 | **Reports**: 13 reports (purchase register, vendor performance, stock position, quality, approvals waiting, headcount, attendance, leave balances, payroll register, PF/ESI/tax summary, overrides & escalations, access review, audit activity). Each is shown only to roles holding its permission, limited to the person's sites in the query itself, with date/month/year filters, summary tiles, a bar chart, and CSV copy/download. **Every run is written to the audit log** (who, which report, filters, rows); payroll reports are marked sensitive | ✅ |
+| **AI custom reports**: describe a report in plain words ("net pay by department last month", "top 5 employees by late minutes this month"); the assistant turns it into a structured spec, shows how it read the request, and runs it. Specs can be saved, kept private or shared. **The AI never writes SQL**: it can only name the datasets and columns in a fixed catalogue (`src/domain/custom-reports.ts`), the dataset's permission and the person's site scope are enforced on every run, all values are query parameters, and each run is audited with the spec and the original question. A payroll-type request from someone without payroll rights is refused | ✅ |
 | Guards: no self-access changes, never remove the last administrator; the admin role keeps user, role and access management and cannot be deleted | ✅ |
 | HR: employee register (site-scoped, bank masked), departments, designations, shifts, holidays | ✅ |
 | Attendance (P/A/H/L/LWP/WO/HOL, late/overtime from the shift), locked once payroll is approved | ✅ |
@@ -49,6 +50,8 @@ Demo logins use the password above; the login screen has one-click person chips.
 **Statutory payroll rates are defaults, not advice** (PF 12% on basic capped at ₹15,000, ESI 0.75%/3.25% up to ₹21,000 gross,
 professional tax ₹200 from ₹25,000, overtime at double the basic hourly rate). They live in `PAYROLL_RULES` in `src/domain/hr.ts`.
 Have your accountant confirm them for your state before paying anyone. Income-tax (TDS) is not handled.
+
+**About the AI:** with `ANTHROPIC_API_KEY` set on the server, requests are read by a Claude model (only the question and the list of columns the person may use are sent, never business data; `AI_MODEL` overrides the model). Without a key, and in the browser demo, a built-in keyword reader handles common requests, so the feature works with no outside service but is less flexible. The demo makes no calls to any AI service.
 
 The escalation time limits (24 h for orders, adjustments and leave; 72 h salary; 48 h payroll; 4 h per rung) are defaults in
 `ESCALATION_RULES` in `src/domain/owner.ts`. The check runs when someone presses the button in the demo; in real use it must be scheduled
