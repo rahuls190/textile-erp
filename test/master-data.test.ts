@@ -152,4 +152,19 @@ describe('bulk add', () => {
     expect(ok.created).toBe(2);
     expect((await w.pool.query(`SELECT 1 FROM partner WHERE name LIKE 'Paste %' AND is_customer`)).rowCount).toBe(1);
   });
+
+  it('billing and shipping addresses: required fields, same-as-billing, defaults, state list', async () => {
+    const c = await w.as('sal', (cx) => md.createParty(cx, { name: 'Addr Test Co', role: 'customer', billing: { line1: '1 Main Rd', city: 'Surat', state: 'Gujarat', pincode: '395003' }, shippingSameAsBilling: true }));
+    const list = (await w.pool.query('SELECT kind, is_default, state FROM partner_address WHERE partner_id=$1 ORDER BY kind', [c.id])).rows;
+    expect(list.map((r) => r.kind)).toEqual(['billing', 'shipping']);
+    expect(list.every((r) => r.is_default && r.state === 'Gujarat')).toBe(true);
+    await rejects(w.as('sal', (cx) => md.addAddress(cx, { partnerId: c.id, kind: 'shipping', line1: 'x' })), 'need city');
+    await rejects(w.as('sal', (cx) => md.addAddress(cx, { partnerId: c.id, kind: 'shipping', line1: 'x', city: 'a', state: 'Atlantis', pincode: '395003' })), 'not in the list');
+    const second = await w.as('sal', (cx) => md.addAddress(cx, { partnerId: c.id, kind: 'shipping', line1: '9 Dock Rd', city: 'Mundra', state: 'Gujarat', pincode: '370421' }));
+    expect(second.is_default).toBe(false);
+    await w.as('sal', (cx) => md.setDefaultAddress(cx, { addressId: second.id }));
+    const d = (await w.pool.query(`SELECT count(*)::int n FROM partner_address WHERE partner_id=$1 AND kind='shipping' AND is_default`, [c.id])).rows[0].n;
+    expect(d).toBe(1);
+    expect(md.INDIAN_STATES.length).toBe(36);
+  });
 });

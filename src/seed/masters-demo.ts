@@ -82,9 +82,10 @@ export async function seedMastersDemo(w: World, withSales: boolean) {
       const row = (await w.pool.query('SELECT id, version FROM partner WHERE code=$1', [code])).rows[0];
       await w.as('sal', (c) => md.updateParty(c, { partnerId: row.id, expectedVersion: row.version, city, state, phone, email: contact.split(' ')[0].toLowerCase() + '@' + (code === 'C-001' ? 'lakshmigarments' : 'urbanwear') + '.example', paymentDays: 45 }));
       await w.as('sal', (c) => md.addContact(c, { partnerId: row.id, name: contact, role: 'Purchase', phone, primary: true }));
-      await w.as('sal', (c) => md.addAddress(c, { partnerId: row.id, kind: 'billing', line1: line, city, state, pincode: pin }));
+      await w.as('sal', (c) => md.addAddress(c, { partnerId: row.id, kind: 'billing', label: 'Head office', line1: line, city, state, pincode: pin, phone }));
+      await w.as('sal', (c) => md.addAddress(c, { partnerId: row.id, kind: 'shipping', label: code === 'C-001' ? 'Godown' : 'Warehouse', line1: code === 'C-001' ? 'Plot 22, SIDCO Industrial Estate' : 'Gala 7, Bhiwandi Logistics Park', line2: 'Gate 2, deliveries 9 to 5', city: code === 'C-001' ? city : 'Bhiwandi', state: code === 'C-001' ? state : 'Maharashtra', pincode: code === 'C-001' ? '641606' : '421302', contactName: contact, phone }));
     }
-    const m = await w.as('sal', (c) => md.createParty(c, { name: 'Metro Innerwear', role: 'customer', gstin: '29AAACM5566E1Z9', pan: 'AAACM5566E', city: 'Bengaluru', state: 'Karnataka', phone: '9900112233', email: 'anil@metroinnerwear.example', contact: { name: 'Anil Kumar', phone: '9900112233', role: 'Owner' } }));
+    const m = await w.as('sal', (c) => md.createParty(c, { name: 'Metro Innerwear', role: 'customer', gstin: '29AAACM5566E1Z9', pan: 'AAACM5566E', city: 'Bengaluru', state: 'Karnataka', phone: '9900112233', email: 'anil@metroinnerwear.example', contact: { name: 'Anil Kumar', phone: '9900112233', role: 'Owner' }, billing: { label: 'Office', line1: '45, Brigade Road', city: 'Bengaluru', state: 'Karnataka', pincode: '560001' }, shippingSameAsBilling: true }));
     await w.as('sal', (c) => masters.submitPartner(c, { partnerId: m.id, expectedVersion: 1 })); // waiting for commercial approval
   }
 }

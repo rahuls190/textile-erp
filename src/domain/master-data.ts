@@ -188,6 +188,26 @@ export async function getMaterial(db: Db, userId: string, id: string) {
 }
 
 // ───────────────────────── Vendors & clients ─────────────────────────
+export const INDIAN_STATES = ['Andaman and Nicobar Islands', 'Andhra Pradesh', 'Arunachal Pradesh', 'Assam', 'Bihar', 'Chandigarh', 'Chhattisgarh', 'Dadra and Nagar Haveli and Daman and Diu', 'Delhi', 'Goa', 'Gujarat', 'Haryana', 'Himachal Pradesh', 'Jammu and Kashmir', 'Jharkhand', 'Karnataka', 'Kerala', 'Ladakh', 'Lakshadweep', 'Madhya Pradesh', 'Maharashtra', 'Manipur', 'Meghalaya', 'Mizoram', 'Nagaland', 'Odisha', 'Puducherry', 'Punjab', 'Rajasthan', 'Sikkim', 'Tamil Nadu', 'Telangana', 'Tripura', 'Uttar Pradesh', 'Uttarakhand', 'West Bengal'];
+export type AddressInput = { kind?: string; label?: string; line1: string; line2?: string; city?: string; state?: string; pincode?: string; contactName?: string; phone?: string; gstin?: string; makeDefault?: boolean };
+const checkState = (st?: string) => { if (st && !INDIAN_STATES.includes(st)) throw badRequest(`State "${st}" is not in the list`); };
+function checkAddress(a: AddressInput, strict: boolean) {
+  if (!a.line1?.trim()) throw badRequest('Address is required');
+  if (strict && (!a.city?.trim() || !a.state || !a.pincode)) throw badRequest('Billing and shipping addresses need city, state and pincode');
+  checkState(a.state);
+  if (a.pincode && !/^\d{6}$/.test(a.pincode)) throw badRequest('Pincode is 6 digits');
+  if (a.phone && !/^[+\d][\d\s-]{6,16}$/.test(a.phone)) throw badRequest('Phone number looks wrong');
+  if (a.gstin && !GSTIN_RE.test(a.gstin.toUpperCase())) throw badRequest('GSTIN for this address looks wrong');
+}
+async function insertAddress(ctx: Ctx, partnerId: string, kind: string, a: AddressInput) {
+  const first = !(await ctx.db.query('SELECT 1 FROM partner_address WHERE partner_id=$1 AND kind=$2', [partnerId, kind])).rowCount;
+  const def = first || !!a.makeDefault;
+  if (def) await ctx.db.query('UPDATE partner_address SET is_default=false WHERE partner_id=$1 AND kind=$2', [partnerId, kind]);
+  const r = await ctx.db.query(`INSERT INTO partner_address(partner_id,kind,label,line1,line2,city,state,pincode,contact_name,phone,gstin,is_default) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12) RETURNING *`,
+    [partnerId, kind, a.label?.trim() || null, a.line1.trim(), a.line2?.trim() || null, a.city?.trim() || null, a.state || null, a.pincode || null, a.contactName?.trim() || null, a.phone || null, a.gstin?.toUpperCase() || null, def]);
+  return r.rows[0];
+}
+
 export type PartnerProfile = { name?: string; gstin?: string; pan?: string; state?: string; city?: string; phone?: string; email?: string; paymentDays?: number | null; notes?: string; bankAccount?: string };
 
 function checkProfile(p: PartnerProfile) {
@@ -196,13 +216,17 @@ function checkProfile(p: PartnerProfile) {
   if (p.gstin && p.pan && p.gstin.slice(2, 12).toUpperCase() !== p.pan.toUpperCase()) throw badRequest('PAN does not match the GSTIN');
   if (p.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(p.email)) throw badRequest('Email address looks wrong');
   if (p.phone && !/^[+\d][\d\s-]{6,16}$/.test(p.phone)) throw badRequest('Phone number looks wrong');
+  checkState(p.state);
   if (p.paymentDays != null && !(Number.isInteger(p.paymentDays) && p.paymentDays >= 0 && p.paymentDays <= 365)) throw badRequest('Payment days: 0 to 365');
 }
 
-export async function createParty(ctx: Ctx, i: PartnerProfile & { name: string; role: 'vendor' | 'customer' | 'both' | 'subcontractor'; code?: string; contact?: { name: string; phone?: string; email?: string; role?: string } }) {
+export async function createParty(ctx: Ctx, i: PartnerProfile & { name: string; role: 'vendor' | 'customer' | 'both' | 'subcontractor'; code?: string; contact?: { name: string; phone?: string; email?: string; role?: string }; billing?: AddressInput; shipping?: AddressInput; shippingSameAsBilling?: boolean }) {
   await assertCan(ctx.db, ctx.actor.id, 'partner.create', ANY);
   if (!i.name?.trim()) throw badRequest('Name is required');
   checkProfile(i);
+  if (i.billing) checkAddress(i.billing, true);
+  const ship = i.shippingSameAsBilling ? i.billing : i.shipping;
+  if (ship) checkAddress(ship, true);
   const dup = await ctx.db.query(`SELECT code FROM partner WHERE lower(name)=lower($1) OR ($2::text IS NOT NULL AND gstin=$2) OR ($3::text IS NOT NULL AND pan=$3 AND lower(name)=lower($1))`, [i.name.trim(), i.gstin?.toUpperCase() ?? null, i.pan?.toUpperCase() ?? null]);
   if (dup.rowCount) throw badRequest(`Possible duplicate — already on file as ${dup.rows[0].code}`);
   const vendor = i.role === 'vendor' || i.role === 'both', cust = i.role === 'customer' || i.role === 'both';
@@ -213,6 +237,8 @@ export async function createParty(ctx: Ctx, i: PartnerProfile & { name: string; 
     [code, i.name.trim(), vendor, cust, i.role === 'subcontractor', i.gstin?.toUpperCase() || null, i.pan?.toUpperCase() || null, i.state || null, i.city || null, i.phone || null, i.email || null, i.paymentDays ?? null, i.notes || null, i.bankAccount || null, ctx.actor.id]);
   const p = r.rows[0];
   if (i.contact?.name.trim()) await ctx.db.query(`INSERT INTO partner_contact(partner_id,name,role,phone,email,is_primary) VALUES ($1,$2,$3,$4,$5,true)`, [p.id, i.contact.name.trim(), i.contact.role || null, i.contact.phone || null, i.contact.email || null]);
+  if (i.billing) await insertAddress(ctx, p.id, 'billing', i.billing);
+  if (ship) await insertAddress(ctx, p.id, 'shipping', ship);
   await audit(ctx, { action: 'partner.create', entityType: 'partner', entityId: p.id, after: { code: p.code, name: p.name, role: i.role } });
   return p;
 }
@@ -259,20 +285,38 @@ export async function removeContact(ctx: Ctx, i: { contactId: string }) {
   if (c.is_primary) await ctx.db.query(`UPDATE partner_contact SET is_primary=true WHERE id=(SELECT id FROM partner_contact WHERE partner_id=$1 ORDER BY created_at LIMIT 1)`, [c.partner_id]);
   await audit(ctx, { action: 'partner.contact.remove', entityType: 'partner', entityId: c.partner_id, before: c });
 }
-export async function addAddress(ctx: Ctx, i: { partnerId: string; kind: string; line1: string; city?: string; state?: string; pincode?: string }) {
+export async function addAddress(ctx: Ctx, i: AddressInput & { partnerId: string; kind: string }) {
   await assertCan(ctx.db, ctx.actor.id, 'partner.edit', ANY);
   if (!(await ctx.db.query('SELECT 1 FROM partner WHERE id=$1', [i.partnerId])).rowCount) throw notFound('Party');
   if (!['registered', 'billing', 'shipping', 'works'].includes(i.kind)) throw badRequest('Address kind: registered, billing, shipping or works');
-  if (!i.line1.trim()) throw badRequest('Address is required');
-  if (i.pincode && !/^\d{6}$/.test(i.pincode)) throw badRequest('Pincode is 6 digits');
-  const r = await ctx.db.query(`INSERT INTO partner_address(partner_id,kind,line1,city,state,pincode) VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`, [i.partnerId, i.kind, i.line1.trim(), i.city || null, i.state || null, i.pincode || null]);
-  await audit(ctx, { action: 'partner.address.add', entityType: 'partner', entityId: i.partnerId, after: r.rows[0] });
+  checkAddress(i, i.kind === 'billing' || i.kind === 'shipping');
+  const row = await insertAddress(ctx, i.partnerId, i.kind, i);
+  await audit(ctx, { action: 'partner.address.add', entityType: 'partner', entityId: i.partnerId, after: row });
+  return row;
+}
+export async function updateAddress(ctx: Ctx, i: AddressInput & { addressId: string }) {
+  await assertCan(ctx.db, ctx.actor.id, 'partner.edit', ANY);
+  const old = (await ctx.db.query('SELECT * FROM partner_address WHERE id=$1 FOR UPDATE', [i.addressId])).rows[0];
+  if (!old) throw notFound('Address');
+  checkAddress(i, old.kind === 'billing' || old.kind === 'shipping');
+  const r = await ctx.db.query(`UPDATE partner_address SET label=$2,line1=$3,line2=$4,city=$5,state=$6,pincode=$7,contact_name=$8,phone=$9,gstin=$10 WHERE id=$1 RETURNING *`,
+    [i.addressId, i.label?.trim() || null, i.line1.trim(), i.line2?.trim() || null, i.city?.trim() || null, i.state || null, i.pincode || null, i.contactName?.trim() || null, i.phone || null, i.gstin?.toUpperCase() || null]);
+  await audit(ctx, { action: 'partner.address.update', entityType: 'partner', entityId: old.partner_id, before: old, after: r.rows[0] });
   return r.rows[0];
+}
+export async function setDefaultAddress(ctx: Ctx, i: { addressId: string }) {
+  await assertCan(ctx.db, ctx.actor.id, 'partner.edit', ANY);
+  const a = (await ctx.db.query('SELECT * FROM partner_address WHERE id=$1 FOR UPDATE', [i.addressId])).rows[0];
+  if (!a) throw notFound('Address');
+  await ctx.db.query('UPDATE partner_address SET is_default=false WHERE partner_id=$1 AND kind=$2', [a.partner_id, a.kind]);
+  await ctx.db.query('UPDATE partner_address SET is_default=true WHERE id=$1', [i.addressId]);
+  await audit(ctx, { action: 'partner.address.default', entityType: 'partner', entityId: a.partner_id, after: { id: a.id, kind: a.kind } });
 }
 export async function removeAddress(ctx: Ctx, i: { addressId: string }) {
   await assertCan(ctx.db, ctx.actor.id, 'partner.edit', ANY);
   const a = (await ctx.db.query('DELETE FROM partner_address WHERE id=$1 RETURNING *', [i.addressId])).rows[0];
   if (!a) throw notFound('Address');
+  if (a.is_default) await ctx.db.query(`UPDATE partner_address SET is_default=true WHERE id=(SELECT id FROM partner_address WHERE partner_id=$1 AND kind=$2 ORDER BY created_at LIMIT 1)`, [a.partner_id, a.kind]);
   await audit(ctx, { action: 'partner.address.remove', entityType: 'partner', entityId: a.partner_id, before: a });
 }
 
@@ -318,7 +362,7 @@ export async function getParty(db: Db, userId: string, id: string) {
   const p = await (await import('./masters.js')).getPartner(db, userId, id).catch(() => null);
   if (!p) return null;
   const contacts = (await db.query('SELECT * FROM partner_contact WHERE partner_id=$1 ORDER BY is_primary DESC, created_at', [id])).rows;
-  const addresses = (await db.query('SELECT * FROM partner_address WHERE partner_id=$1 ORDER BY created_at', [id])).rows;
+  const addresses = (await db.query('SELECT * FROM partner_address WHERE partner_id=$1 ORDER BY kind, is_default DESC, created_at', [id])).rows;
   const rates = (await db.query(
     `SELECT r.id, r.rate::text, r.unit, r.min_qty::text, r.effective_from, r.effective_to, r.status, r.proposed_by, i.code AS item_code, i.name AS item_name
        FROM rate r JOIN item i ON i.id=r.item_id WHERE r.partner_id=$1 ORDER BY i.code, r.effective_from DESC`, [id])).rows;
