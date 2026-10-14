@@ -1,0 +1,453 @@
+import { LitePool } from './lite-pool.js';
+import { openWorld } from './world.js';
+import { runWorkedExample, type Step } from './walkthrough.js';
+import { html, raw, esc, qty, money, when, dateOnly, chip, type Raw } from './lib.js';
+import type { World } from '../src/seed/demo.js';
+import type { Ctx } from '../src/core/command.js';
+import { can } from '../src/core/permissions.js';
+import { qAdd, qSub } from '../src/core/qty.js';
+import * as po from '../src/domain/po.js';
+import * as rcv from '../src/domain/receipt.js';
+import * as qc from '../src/domain/qc.js';
+import * as inv from '../src/domain/inventory.js';
+import * as q from '../src/domain/queries.js';
+import { currentRate } from '../src/domain/masters.js';
+
+declare const __BUILD_ID__: string;
+type Db = import('../src/db/pool.js').Db;
+
+const PEOPLE: Record<string, { name: string; role: string }> = {
+  buy: { name: 'Asha Rao', role: 'Buyer' },
+  com: { name: 'Vikram Shah', role: 'Commercial approver · limit ₹5,00,000' },
+  sto: { name: 'Imran Qureshi', role: 'Storekeeper' },
+  qci: { name: 'Meera Nair', role: 'Quality inspector' },
+  qcm: { name: 'Dr. Suresh Pillai', role: 'Quality manager' },
+  inv: { name: 'Lakshmi Iyer', role: 'Inventory controller · limit 1,000 m' },
+  md: { name: 'Rahul Sharma', role: 'Master-data steward' },
+  eng: { name: 'Deepak Menon', role: 'Engineer / technical approver' },
+  fc: { name: 'Anita Desai', role: 'Finance controller' },
+  aud: { name: 'Karan Mehta', role: 'Auditor (read-only)' },
+  admin: { name: 'System admin', role: 'Administrator (no business approvals)' },
+};
+const ORDER = ['buy', 'com', 'sto', 'qci', 'qcm', 'inv', 'md', 'eng', 'fc', 'aud', 'admin'];
+
+type View = 'overview' | 'po' | 'receiving' | 'quality' | 'stock' | 'audit' | 'access';
+const NAV: { id: View; label: string; hint: string }[] = [
+  { id: 'overview', label: 'Overview', hint: 'Your role and the worked example' },
+  { id: 'po', label: 'Purchase orders', hint: 'Create, approve, release' },
+  { id: 'receiving', label: 'Receiving', hint: 'Material arriving at the gate' },
+  { id: 'quality', label: 'Quality', hint: 'Inspect and release' },
+  { id: 'stock', label: 'Stock', hint: 'Rolls, reservations, adjustments' },
+  { id: 'audit', label: 'Audit trail', hint: 'Who did what' },
+  { id: 'access', label: 'Roles & limits', hint: 'Who is allowed what' },
+];
+
+let world: World; let pool: LitePool;
+const S = { user: 'sto', view: 'overview' as View, poId: '', inspId: '', lotId: '', open: new Set<string>(), log: [] as Step[], running: false, filter: '' };
+
+const $ = (s: string) => document.querySelector(s) as HTMLElement;
+const uid = () => world.actors[S.user].id;
+async function read<T>(fn: (db: Db) => Promise<T>): Promise<T> {
+  const c = await pool.connect();
+  try { return await fn(c as never); } finally { c.release(); }
+}
+const val = (id: string) => (document.getElementById(id) as HTMLInputElement | null)?.value.trim() ?? '';
+
+// ───────────── feedback ─────────────
+function toast(msg: string, kind: 'ok' | 'bad' = 'ok', detail?: string) {
+  const el = document.createElement('div');
+  el.className = `toast ${kind}`;
+  el.innerHTML = `<strong>${kind === 'ok' ? 'Done' : 'Blocked'}</strong><span>${esc(msg)}</span>${detail ? `<small>${esc(detail)}</small>` : ''}`;
+  $('#toasts').appendChild(el);
+  setTimeout(() => el.remove(), kind === 'ok' ? 3200 : 7000);
+}
+async function act(label: string, fn: (c: Ctx) => Promise<unknown>) {
+  try { await world.as(S.user, fn); toast(label); await render(); }
+  catch (e) { const err = e as { code?: string; message?: string }; toast(err.message ?? 'Failed', 'bad', err.code); }
+}
+
+// ───────────── shell ─────────────
+function shell(content: Raw): string {
+  const me = PEOPLE[S.user];
+  return html`
+  <header class="top">
+    <div class="brand"><span class="mark" aria-hidden="true"></span><div><b>Textile ERP</b><small>Kalyani Plant 1 · demo data</small></div></div>
+    <label class="actor"><span>Acting as</span>
+      <select id="who" aria-label="Acting as">${ORDER.map((k) => html`<option value="${k}" ${k === S.user ? raw('selected') : ''}>${PEOPLE[k].name} — ${PEOPLE[k].role.split(' · ')[0]}</option>`)}</select>
+    </label>
+  </header>
+  <div class="frame">
+    <nav class="side" aria-label="Sections">${NAV.map((n) => html`<a href="#${n.id}" class="${n.id === S.view ? 'on' : ''}" data-view="${n.id}"><b>${n.label}</b><small>${n.hint}</small></a>`)}
+      <button class="ghost reset" data-act="reset">Reset demo data</button></nav>
+    <main id="main" aria-live="polite" aria-label="${me.role}">${content}</main>
+  </div>`.s;
+}
+
+const head = (title: string, sub: string, right?: Raw) => html`<div class="head"><div><h1>${title}</h1><p>${sub}</p></div>${right ?? ''}</div>`;
+const rollBar = (r: { held: string; accepted: string; rejected: string; reserved: string; available: string }) => {
+  const held = Number(r.held), rej = Number(r.rejected), res = Number(r.reserved), av = Math.max(Number(r.available), 0);
+  const tot = held + rej + res + av || 1;
+  const seg = (n: number, c: string, t: string) => (n > 0 ? `<i class="${c}" style="flex:${(n / tot).toFixed(4)}" title="${t}: ${qty(String(n))}"></i>` : '');
+  return raw(`<div class="bar" role="img" aria-label="Held ${qty(r.held)}, available ${qty(r.available)}, reserved ${qty(r.reserved)}, rejected ${qty(r.rejected)}">${seg(av, 'av', 'Free')}${seg(res, 'rs', 'Reserved')}${seg(held, 'hd', 'On QC hold')}${seg(rej, 'rj', 'Rejected')}</div>`);
+};
+const legend = html`<div class="legend"><span><i class="av"></i>Free</span><span><i class="rs"></i>Reserved</span><span><i class="hd"></i>On QC hold</span><span><i class="rj"></i>Rejected</span></div>`;
+const kv = (k: string, v: unknown) => html`<div class="kv"><span>${k}</span><b>${v}</b></div>`;
+
+// ───────────── views ─────────────
+async function overview(): Promise<Raw> {
+  const d = await read(async (db) => {
+    const pos = await po.listPOs(db, uid());
+    const insp = await qc.listInspections(db, uid());
+    const stock = await q.stockSummary(db, uid());
+    const access = await q.myAccess(db, uid());
+    const checks: [string, string, string][] = [
+      ['Approve a purchase order', 'po.approve', '120000'], ['Release a purchase order', 'po.release', '120000'], ['Receive material', 'receipt.post', ''],
+      ['Release stock from QC hold', 'qc.release', ''], ['Reserve stock', 'reservation.allocate', ''], ['Approve a stock adjustment', 'adjustment.approve', '50'], ['Read the audit trail', 'audit.view', ''],
+    ];
+    const perms = [] as { label: string; ok: boolean }[];
+    for (const [label, key, amt] of checks) perms.push({ label, ok: await can(db, uid(), key, { siteId: world.siteId, amount: amt || undefined, anySite: key === 'audit.view' }) });
+    return { pos, insp, stock, access, perms };
+  });
+  const free = d.stock.reduce((a, s) => qAdd(a, s.available), '0');
+  const kpi = (label: string, v: string | number, sub: string) => html`<div class="kpi"><span>${label}</span><b>${v}</b><small>${sub}</small></div>`;
+  const me = PEOPLE[S.user];
+  return html`
+  ${head('Overview', 'One company, one set of rules. Switch who you are acting as at the top to see what each role can and cannot do.')}
+  <section class="kpis">
+    ${kpi('Awaiting approval', d.pos.filter((p) => p.status === 'approval_pending').length, 'purchase orders')}
+    ${kpi('Open for receipt', d.pos.filter((p) => ['released', 'acknowledged', 'partial_receipt'].includes(p.status)).length, 'purchase orders')}
+    ${kpi('Quality queue', d.insp.filter((i) => ['pending', 'inspecting', 'submitted', 'partial', 'held'].includes(i.status)).length, 'inspections')}
+    ${kpi('Free stock', qty(free), 'metres, not held or reserved')}
+  </section>
+  <section class="cols">
+    <div class="card">
+      <h2>${me.name}</h2><p class="sub">${me.role}</p>
+      <ul class="perm">${d.perms.map((p) => html`<li class="${p.ok ? 'yes' : 'no'}"><span>${p.ok ? '✓' : '✕'}</span>${p.label}</li>`)}</ul>
+      <p class="note">Every action is checked by the rules engine, not just hidden on the screen. Try a blocked one from the other pages and you will get the refusal with its reason.</p>
+    </div>
+    <div class="card">
+      <h2>Worked example</h2>
+      <p class="sub">500 m of fabric from purchase order to reservation, played through the real rules by the people involved, including the steps the system has to refuse.</p>
+      <button class="primary" data-act="walk" ${S.running ? raw('disabled') : ''}>${S.running ? 'Running…' : 'Run the 500 m example'}</button>
+      ${S.log.length ? html`<ol class="steps">${S.log.map((s) => html`<li class="${s.ok && s.note?.startsWith('Refused') ? 'refused' : s.ok ? 'done' : 'fail'}"><span class="who">${PEOPLE[s.who]?.role.split(' · ')[0]}</span><div><b>${s.text}</b>${s.note ? html`<small>${s.note}</small>` : ''}</div></li>`)}</ol>` : html`<p class="empty">Each run adds a new purchase order and roll to the lists, so you can open them afterwards.</p>`}
+    </div>
+  </section>`;
+}
+
+async function poView(): Promise<Raw> {
+  const d = await read(async (db) => {
+    const list = await po.listPOs(db, uid());
+    const sel = S.poId ? await po.getPO(db, uid(), S.poId).catch(() => null) : null;
+    const rcpt = sel ? (await db.query(`SELECT r.number, r.challan_no, r.received_at FROM receipt r WHERE r.po_id=$1 ORDER BY r.received_at`, [sel.id])).rows : [];
+    const names = Object.fromEntries((await db.query('SELECT id, username FROM app_user')).rows.map((r) => [r.id, r.username]));
+    const items = (await db.query(`SELECT id, code, name FROM item WHERE status='active' ORDER BY code`)).rows;
+    const vendors = (await db.query(`SELECT id, code, name FROM partner WHERE status='active' AND is_vendor ORDER BY code`)).rows;
+    const itemCodes = Object.fromEntries((await db.query('SELECT id, code FROM item')).rows.map((r) => [r.id, r.code]));
+    return { list, sel, rcpt, names, items, vendors, itemCodes };
+  });
+  const s = d.sel;
+  const reason = html`<input id="reason" placeholder="Reason (needed to return, cancel or amend)" aria-label="Reason" />`;
+  const actions = (): Raw => {
+    if (!s) return html``;
+    const b = (a: string, label: string, cls = '') => html`<button class="${cls}" data-act="${a}">${label}</button>`;
+    const pa = s.pending_amendment as null | { reason: string; newTotal: string };
+    if (pa) return html`<div class="pending"><b>Amendment awaiting approval</b><span>${pa.reason} · new total ${money(pa.newTotal)} · proposed by ${d.names[s.amended_by] ?? ''}</span></div><div class="row">${b('po-approve', 'Approve amendment', 'primary')}${b('po-return', 'Discard amendment')}</div>${reason}`;
+    switch (s.status) {
+      case 'draft': return html`<div class="row">${b('po-submit', 'Submit for approval', 'primary')}${b('po-cancel', 'Cancel order')}</div>${reason}`;
+      case 'approval_pending': return html`<div class="row">${b('po-approve', 'Approve', 'primary')}${b('po-return', 'Return to buyer')}${b('po-cancel', 'Cancel order')}</div>${reason}`;
+      case 'approved': return html`<div class="row">${b('po-release', 'Release to vendor', 'primary')}${b('po-cancel', 'Cancel order')}</div>${reason}`;
+      case 'released': case 'acknowledged': case 'partial_receipt':
+        return html`<div class="row">${b('po-amend', 'Propose +5% price change')}${b('po-cancel', 'Cancel / short-close')}</div>${reason}`;
+      default: return html`<p class="note">This order is ${s.status}. No further actions.</p>`;
+    }
+  };
+  const form = S.open.has('newpo') ? html`
+    <form class="card form" data-form="newpo">
+      <h2>New purchase order</h2>
+      <label>Vendor<select id="f-vendor">${d.vendors.map((v) => html`<option value="${v.id}">${v.code} · ${v.name}</option>`)}</select></label>
+      <label>Item<select id="f-item">${d.items.map((i) => html`<option value="${i.id}">${i.code} · ${i.name}</option>`)}</select></label>
+      <label>Quantity (m)<input id="f-qty" inputmode="decimal" value="500" /></label>
+      <label>Due date<input id="f-due" type="date" value="2026-11-30" /></label>
+      <p class="note">The price comes from the vendor's approved rate and is copied onto the order, so later rate changes never rewrite it.</p>
+      <div class="row"><button class="primary" type="submit">Create draft</button><button type="button" data-act="toggle-newpo">Close</button></div>
+    </form>` : html``;
+  return html`
+  ${head('Purchase orders', 'Creating, approving and releasing are three separate rights. Nobody approves their own order.', html`<button class="primary" data-act="toggle-newpo">New purchase order</button>`)}
+  ${form}
+  <section class="split">
+    <div class="card flush"><div class="tablewrap"><table>
+      <thead><tr><th>Order</th><th>Vendor</th><th>Status</th><th class="r">Total</th></tr></thead>
+      <tbody>${d.list.length ? d.list.map((p) => html`<tr class="pick ${p.id === S.poId ? 'on' : ''}" data-pick-po="${p.id}" tabindex="0"><td class="mono">${p.number}</td><td>${p.vendor}</td><td>${chip(p.status)}</td><td class="r num">${money(p.total)}</td></tr>`) : html`<tr><td colspan="4" class="empty">No purchase orders you can see yet. Create one, or run the worked example on the Overview.</td></tr>`}</tbody>
+    </table></div></div>
+    <aside class="card detail">${s ? html`
+      <div class="dh"><h2 class="mono">${s.number}</h2>${chip(s.status)}</div>
+      ${kv('Total', money(s.total))}${kv('Version', `v${s.version} · revision ${s.revision}`)}${kv('Created by', d.names[s.created_by] ?? '')}${kv('Approved by', d.names[s.approved_by] ?? '–')}${kv('Released by', d.names[s.released_by] ?? '–')}
+      <h3>Lines</h3>
+      <div class="tablewrap"><table class="mini"><thead><tr><th>Item</th><th class="r">Ordered</th><th class="r">Received</th><th class="r">Accepted</th><th class="r">Rejected</th><th class="r">Rate</th></tr></thead>
+      <tbody>${s.lines.map((l: Record<string, string>) => html`<tr><td class="mono">${d.itemCodes[l.item_id]}</td><td class="r num">${qty(l.qty)}</td><td class="r num">${qty(l.received_qty)}</td><td class="r num">${qty(l.accepted_qty)}</td><td class="r num">${qty(l.rejected_qty)}</td><td class="r num">${money(l.rate)}</td></tr>`)}</tbody></table></div>
+      ${d.rcpt.length ? html`<h3>Receipts</h3><ul class="plain">${d.rcpt.map((r) => html`<li><span class="mono">${r.number}</span> · challan ${r.challan_no} · ${when(r.received_at)}</li>`)}</ul>` : ''}
+      <h3>History</h3><ul class="plain">${s.versions.map((v: { version: number; reason: string; at: string }) => html`<li><span class="mono">v${v.version}</span> ${v.reason ?? ''} <small>${when(v.at)}</small></li>`)}</ul>
+      <h3>Actions</h3>${actions()}` : html`<p class="empty">Select an order to see its lines, history and the actions available.</p>`}
+    </aside>
+  </section>`;
+}
+
+async function receivingView(): Promise<Raw> {
+  const d = await read(async (db) => {
+    const pos = (await po.listPOs(db, uid())).filter((p) => ['released', 'acknowledged', 'partial_receipt'].includes(p.status));
+    const lines = pos.length ? (await db.query(
+      `SELECT pl.id, pl.po_id, pl.qty, pl.received_qty, pl.rejected_qty, i.code, i.id AS item_id FROM po_line pl JOIN item i ON i.id = pl.item_id WHERE pl.po_id = ANY($1::uuid[]) ORDER BY pl.line_no`, [pos.map((p) => p.id)])).rows : [];
+    const receipts = await rcv.listReceipts(db, uid());
+    return { pos, lines, receipts };
+  });
+  const sel = S.poId && d.pos.find((p) => p.id === S.poId) ? S.poId : d.pos[0]?.id ?? '';
+  const open = (l: Record<string, string>) => qSub(l.qty, qSub(l.received_qty, l.rejected_qty));
+  const lines = d.lines.filter((l) => l.po_id === sel);
+  return html`
+  ${head('Receiving', 'Arrival never makes usable stock. Every roll lands on QC hold until quality authority releases it.')}
+  <section class="split">
+    <form class="card form" data-form="receive">
+      <h2>Receive a roll</h2>
+      ${d.pos.length ? html`
+      <label>Purchase order<select id="r-po" data-reload-po>${d.pos.map((p) => html`<option value="${p.id}" ${p.id === sel ? raw('selected') : ''}>${p.number} · ${p.vendor}</option>`)}</select></label>
+      <label>Line<select id="r-line">${lines.map((l) => html`<option value="${l.id}|${l.item_id}">${l.code} · ${qty(open(l))} m still open</option>`)}</select></label>
+      <label>Quantity received (m)<input id="r-qty" inputmode="decimal" value="${lines[0] ? qty(open(lines[0])).replace(/,/g, '') : ''}" /></label>
+      <label>Vendor challan number<input id="r-challan" value="CH-${Math.floor(Math.random() * 9000 + 1000)}" /></label>
+      <p class="note">Try entering more than is open: the system blocks over-receipt. Reusing a challan number is blocked too, unless an inventory controller acknowledges the repeat.</p>
+      <button class="primary" type="submit">Post receipt</button>` : html`<p class="empty">No released purchase orders to receive against. Approve and release one first (Buyer → Commercial approver), or run the worked example.</p>`}
+    </form>
+    <div class="card flush"><div class="tablewrap"><table>
+      <thead><tr><th>Receipt</th><th>Vendor</th><th>Challan</th><th>When</th></tr></thead>
+      <tbody>${d.receipts.length ? d.receipts.map((r) => html`<tr><td class="mono">${r.number}</td><td>${r.vendor}</td><td class="mono">${r.challan_no}</td><td>${when(r.received_at)}</td></tr>`) : html`<tr><td colspan="4" class="empty">No receipts yet.</td></tr>`}</tbody>
+    </table></div></div>
+  </section>`;
+}
+
+async function qualityView(): Promise<Raw> {
+  const d = await read((db) => qc.listInspections(db, uid()));
+  const sel = d.find((i) => i.id === S.inspId);
+  const pend = d.filter((i) => !['accepted', 'rejected'].includes(i.status));
+  const panel = !sel ? html`<p class="empty">Select an inspection to act on it.</p>` : await (async () => {
+    const full = (await read((db) => db.query('SELECT * FROM qc_inspection WHERE id=$1', [sel.id]))).rows[0];
+    const held = qSub(sel.qty, qAdd(sel.accepted_qty, sel.rejected_qty));
+    return html`
+      <div class="dh"><h2 class="mono">${sel.label}</h2>${chip(sel.status)}</div>
+      ${kv('Item', sel.item_code)}${kv('Received', `${qty(sel.qty)} m`)}${kv('Still on hold', `${qty(held)} m`)}${kv('Released', `${qty(sel.accepted_qty)} m`)}${kv('Rejected', `${qty(sel.rejected_qty)} m`)}
+      ${sel.status === 'pending' ? html`<button class="primary" data-act="qc-start">Start inspection</button>` : ''}
+      ${sel.status === 'inspecting' ? html`<form class="form" data-form="qc-submit"><h3>Record result</h3>
+        <label>Sample inspected (m)<input id="q-sample" inputmode="decimal" value="20" /></label>
+        <label>Recommend accept (m)<input id="q-ra" inputmode="decimal" value="${qty(held).replace(/,/g, '')}" /></label>
+        <label>Recommend reject (m)<input id="q-rr" inputmode="decimal" value="0" /></label>
+        <p class="note">An inspector recommends. Only quality authority can release.</p><button class="primary" type="submit">Submit recommendation</button></form>` : ''}
+      ${['submitted', 'held', 'partial'].includes(sel.status) ? html`<form class="form" data-form="qc-disp"><h3>Disposition</h3>
+        <label>Release as usable (m)<input id="d-acc" inputmode="decimal" value="${qty(full.recommend_accept ?? held).replace(/,/g, '')}" /></label>
+        <label>Reject (m)<input id="d-rej" inputmode="decimal" value="${qty(full.recommend_reject ?? '0').replace(/,/g, '')}" /></label>
+        <p class="note">Released + rejected can never exceed what is still on hold.</p><button class="primary" type="submit">Record disposition</button></form>` : ''}
+      ${['accepted', 'rejected'].includes(sel.status) ? html`<p class="note">Closed. A later reinspection would create a new linked result and never erase this one.</p>` : ''}`;
+  })();
+  return html`
+  ${head('Quality', 'Inspectors recommend, quality managers decide. Held stock cannot be allocated.')}
+  <section class="split">
+    <div class="card flush"><div class="tablewrap"><table>
+      <thead><tr><th>Roll</th><th>Item</th><th class="r">Metres</th><th>Status</th></tr></thead>
+      <tbody>${d.length ? [...pend, ...d.filter((i) => !pend.includes(i))].map((i) => html`<tr class="pick ${i.id === S.inspId ? 'on' : ''}" data-pick-qc="${i.id}" tabindex="0"><td class="mono">${i.label}</td><td class="mono">${i.item_code}</td><td class="r num">${qty(i.qty)}</td><td>${chip(i.status)}</td></tr>`) : html`<tr><td colspan="4" class="empty">Nothing to inspect yet. Post a receipt first.</td></tr>`}</tbody>
+    </table></div></div>
+    <aside class="card detail">${panel}</aside>
+  </section>`;
+}
+
+async function stockView(): Promise<Raw> {
+  const d = await read(async (db) => {
+    const stock = await q.stockSummary(db, uid());
+    const adj = await q.listAdjustments(db, uid());
+    const ref = await q.referenceData(db);
+    const ledger = S.lotId ? await q.lotLedger(db, uid(), S.lotId).catch(() => []) : [];
+    const res = S.lotId ? await q.lotReservations(db, uid(), S.lotId) : [];
+    return { stock, adj, ref, ledger, res };
+  });
+  const loc = (kind: string) => d.ref.locations.filter((l) => l.kind === kind);
+  const lotPanel = (r: (typeof d.stock)[number]) => html`
+    <div class="lotpanel">
+      <div class="forms">
+        <form class="form" data-form="reserve"><h3>Reserve</h3><label>Metres<input id="s-qty" inputmode="decimal" value="50" /></label><label>For<input id="s-ref" value="CUT-${Math.floor(Math.random() * 900 + 100)}" /></label><button class="primary" type="submit">Reserve</button></form>
+        <form class="form" data-form="putaway"><h3>Move to rack</h3><label>Metres<input id="p-qty" inputmode="decimal" value="${qty(r.accepted).replace(/,/g, '')}" /></label><label>To<select id="p-to">${[...loc('RACK'), ...loc('STORE')].map((l) => html`<option value="${l.id}">${l.code}</option>`)}</select></label><button type="submit">Move accepted stock</button></form>
+        <form class="form" data-form="adjust"><h3>Propose adjustment</h3><label>Change (m, − to remove)<input id="a-qty" inputmode="decimal" value="-5" /></label><label>Reason<input id="a-reason" value="Count variance" /></label><button type="submit">Propose</button></form>
+      </div>
+      <div class="two">
+        <div><h3>Movements</h3><div class="tablewrap"><table class="mini"><thead><tr><th>Type</th><th>Status</th><th>Where</th><th class="r">Metres</th><th>By</th></tr></thead>
+          <tbody>${d.ledger.map((l) => html`<tr><td>${l.movement_type.toLowerCase()}</td><td>${l.status.toLowerCase()}</td><td class="mono">${l.location}</td><td class="r num ${l.qty.startsWith('-') ? 'neg' : ''}">${qty(l.qty)}</td><td>${l.actor}</td></tr>`)}</tbody></table></div>
+          <p class="note">The ledger is append-only. There is no way to overwrite a balance.</p></div>
+        <div><h3>Reservations</h3>${d.res.length ? html`<ul class="plain">${d.res.map((x) => html`<li><span class="mono">${x.demand_ref}</span> · ${qty(x.qty)} m · ${chip(x.status)} ${x.status === 'active' ? html`<button class="link" data-act="unreserve" data-id="${x.id}">release</button>` : ''}</li>`)}</ul>` : html`<p class="empty">None.</p>`}</div>
+      </div>
+    </div>`;
+  return html`
+  ${head('Stock', 'Every roll shows what is free, reserved, on quality hold or rejected. Balances come from the ledger, never typed in.')}
+  ${legend}
+  <section class="rolls">${d.stock.length ? d.stock.map((r) => html`
+    <article class="card roll ${r.lot_id === S.lotId ? 'open' : ''}">
+      <button class="rollhead" data-pick-lot="${r.lot_id}" aria-expanded="${r.lot_id === S.lotId}">
+        <span class="mono lab">${r.label}</span><span class="it">${r.item_code} · ${r.item_name}</span>
+        ${rollBar(r)}
+        <span class="nums"><b>${qty(r.available)}</b> free · ${qty(r.reserved)} reserved · ${qty(r.held)} on hold · ${qty(r.rejected)} rejected</span>
+      </button>
+      ${r.lot_id === S.lotId ? lotPanel(r) : ''}
+    </article>`) : html`<div class="card"><p class="empty">No rolls yet. Receive material, or run the worked example from the Overview.</p></div>`}</section>
+  <h2 class="sec">Stock adjustments</h2>
+  <div class="card flush"><div class="tablewrap"><table>
+    <thead><tr><th>No.</th><th>Roll</th><th class="r">Change (m)</th><th>Reason</th><th>Proposed by</th><th>Status</th><th></th></tr></thead>
+    <tbody>${d.adj.length ? d.adj.map((a) => html`<tr><td class="mono">${a.number}</td><td class="mono">${a.label}</td><td class="r num">${qty(a.qty_delta)}</td><td>${a.reason}</td><td>${a.proposed_by}</td><td>${chip(a.status)}</td>
+      <td class="acts">${a.status === 'proposed' ? html`<button data-act="adj-yes" data-id="${a.id}" data-v="${a.version}">Approve</button><button class="ghost" data-act="adj-no" data-id="${a.id}" data-v="${a.version}">Reject</button>` : a.status === 'approved' ? html`<button data-act="adj-post" data-id="${a.id}" data-v="${a.version}">Post</button>` : ''}</td></tr>`) : html`<tr><td colspan="7" class="empty">No adjustments. Propose one from a roll above, then approve it as a different person.</td></tr>`}</tbody>
+  </table></div></div>`;
+}
+
+async function auditView(): Promise<Raw> {
+  const rows = await read((db) => q.recentAudit(db, uid(), 150));
+  if (!rows) return html`${head('Audit trail', 'Every committed change is recorded with who did it and why.')}<div class="card"><p class="empty">Your role cannot read the audit trail. Switch to the Auditor, Finance controller or System administrator.</p></div>`;
+  const f = S.filter.toLowerCase();
+  const shown = rows.filter((r) => !f || `${r.action} ${r.actor} ${r.entity_type} ${r.reason ?? ''}`.toLowerCase().includes(f));
+  return html`
+  ${head('Audit trail', 'Append-only. Not even an administrator can edit or delete an entry.')}
+  <div class="card flush"><div class="bar2"><input id="filter" placeholder="Filter by person, action or record…" value="${S.filter}" aria-label="Filter" /><span>${shown.length} of ${rows.length}</span></div>
+  <div class="tablewrap"><table><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Record</th><th>Reason</th></tr></thead>
+  <tbody>${shown.map((r) => html`<tr><td>${when(r.at)}</td><td>${r.actor}</td><td class="mono">${r.action}</td><td>${r.entity_type.replace(/_/g, ' ')}</td><td>${r.reason ?? ''}</td></tr>`)}</tbody></table></div></div>`;
+}
+
+async function accessView(): Promise<Raw> {
+  const d = await read((db) => q.accessMatrix(db));
+  const by = (r: string) => d.holders.filter((h) => h.role_key === r);
+  return html`
+  ${head('Roles & limits', 'Permission = role action + site + validity + approval limit. Denied unless all of them allow it.')}
+  <section class="roles">${d.roles.map((r) => html`
+    <article class="card"><div class="dh"><h2>${r.key}</h2><span class="muted">${by(r.key).map((h) => h.username).join(', ') || 'no users in this demo'}</span></div>
+      <p class="sub">${r.description}</p>
+      <div class="tags">${(r.permissions as string[]).map((p) => html`<span class="tag ${p.includes('banded') ? 'band' : ''}">${p.replace(' (banded)', '')}${p.includes('banded') ? ' ·limit' : ''}</span>`)}</div>
+      ${by(r.key).filter((h) => h.max_amount).map((h) => html`<p class="note">${h.username}: approval limit ${qty(h.max_amount)}</p>`)}
+    </article>`)}</section>`;
+}
+
+const VIEWS: Record<View, () => Promise<Raw>> = { overview, po: poView, receiving: receivingView, quality: qualityView, stock: stockView, audit: auditView, access: accessView };
+
+let queued = false;
+function scheduleRender() { if (queued) return; queued = true; setTimeout(() => { queued = false; void render(); }, 0); }
+
+async function render() {
+  const keep = { y: window.scrollY, f: document.activeElement?.id };
+  const content = await VIEWS[S.view]().catch((e) => html`<div class="card"><h2>Something went wrong</h2><p class="note">${(e as Error).message}</p></div>`);
+  $('#app').innerHTML = shell(content);
+  window.scrollTo(0, keep.y);
+  if (keep.f) (document.getElementById(keep.f) as HTMLElement | null)?.focus();
+}
+
+// ───────────── events ─────────────
+const poVer = async (c: { db: Db }) => (await c.db.query('SELECT version FROM purchase_order WHERE id=$1', [S.poId])).rows[0].version as number;
+const reasonOr = (d: string) => val('reason') || d;
+
+document.addEventListener('click', async (ev) => {
+  const t = ev.target as HTMLElement;
+  const nav = t.closest('[data-view]') as HTMLElement | null;
+  if (nav) { ev.preventDefault(); S.view = nav.dataset.view as View; history.replaceState(null, '', '#' + S.view); return render(); }
+  const pp = t.closest('[data-pick-po]') as HTMLElement | null; if (pp) { S.poId = pp.dataset.pickPo!; return render(); }
+  const pq = t.closest('[data-pick-qc]') as HTMLElement | null; if (pq) { S.inspId = pq.dataset.pickQc!; return render(); }
+  const pl = t.closest('[data-pick-lot]') as HTMLElement | null; if (pl) { S.lotId = S.lotId === pl.dataset.pickLot ? '' : pl.dataset.pickLot!; return render(); }
+  const b = t.closest('[data-act]') as HTMLElement | null; if (!b) return;
+  const a = b.dataset.act!, id = b.dataset.id ?? '', v = Number(b.dataset.v ?? 0);
+  switch (a) {
+    case 'toggle-newpo': S.open.has('newpo') ? S.open.delete('newpo') : S.open.add('newpo'); return render();
+    case 'po-submit': return act('Submitted for approval', async (c) => po.submitPO(c, { poId: S.poId, expectedVersion: await poVer(c) }));
+    case 'po-approve': return act('Approved', async (c) => po.approvePO(c, { poId: S.poId, expectedVersion: await poVer(c) }));
+    case 'po-release': return act('Released to vendor', async (c) => po.releasePO(c, { poId: S.poId, expectedVersion: await poVer(c) }));
+    case 'po-return': return act('Returned', async (c) => po.returnPO(c, { poId: S.poId, expectedVersion: await poVer(c), reason: reasonOr('') }));
+    case 'po-cancel': return act('Order closed', async (c) => po.cancelPO(c, { poId: S.poId, expectedVersion: await poVer(c), reason: reasonOr('') }));
+    case 'po-amend': return act('Amendment proposed. It applies only after approval', async (c) => {
+      const lines = (await c.db.query('SELECT id, rate FROM po_line WHERE po_id=$1', [S.poId])).rows;
+      const bump = (r: string) => (Math.round(Number(r) * 1.05 * 10000) / 10000).toFixed(4);
+      return po.amendPO(c, { poId: S.poId, expectedVersion: await poVer(c), reason: reasonOr('Vendor price revision'), changes: lines.map((l) => ({ lineId: l.id, rate: bump(l.rate) })) });
+    });
+    case 'qc-start': return act('Inspection started', (c) => qc.startInspection(c, { inspectionId: S.inspId }));
+    case 'unreserve': return act('Reservation released', (c) => inv.releaseReservation(c, { reservationId: id, reason: 'Released from the stock screen' }));
+    case 'adj-yes': return act('Adjustment approved', (c) => inv.approveAdjustment(c, { adjustmentId: id, expectedVersion: v, approve: true }));
+    case 'adj-no': return act('Adjustment rejected', (c) => inv.approveAdjustment(c, { adjustmentId: id, expectedVersion: v, approve: false }));
+    case 'adj-post': return act('Adjustment posted to the ledger', (c) => inv.postAdjustment(c, { adjustmentId: id, expectedVersion: v }));
+    case 'walk': {
+      S.running = true; S.log = []; await render();
+      try { const r = await runWorkedExample(world, (s) => { S.log.push(s); scheduleRender(); }); S.poId = r.poId; S.lotId = r.lotId; toast('Worked example complete'); }
+      catch (e) { toast((e as Error).message, 'bad'); }
+      S.running = false; return render();
+    }
+    case 'reset': {
+      b.textContent = 'Resetting…';
+      try { await pool.db.close(); } catch { /* already closed */ }
+      try { indexedDB.deleteDatabase('/pglite/' + dbName()); } catch { /* ignore */ }
+      setTimeout(() => location.reload(), 400);
+    }
+  }
+});
+
+document.addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  const f = (ev.target as HTMLElement).closest('[data-form]') as HTMLElement | null; if (!f) return;
+  switch (f.dataset.form) {
+    case 'newpo': {
+      const partnerId = val('f-vendor'), itemId = val('f-item');
+      return act('Draft purchase order created', async (c) => { const p = await po.createPO(c, { siteId: world.siteId, partnerId, lines: [{ itemId, qty: val('f-qty'), dueDate: val('f-due') || null }] }); S.poId = p.id; S.open.delete('newpo'); return p; });
+    }
+    case 'receive': {
+      const [poLineId, itemId] = val('r-line').split('|'); const poId = val('r-po');
+      return act('Receipt posted. The roll is on QC hold', (c) => rcv.postReceipt(c, { siteId: world.siteId, partnerId: world.vendorId, poId, challanNo: val('r-challan'), lines: [{ poLineId, itemId, qty: val('r-qty') }] }));
+    }
+    case 'qc-submit': return act('Recommendation recorded', async (c) => qc.submitInspection(c, { inspectionId: S.inspId, expectedVersion: await insVer(c), inspectedQty: val('q-sample'), recommendAccept: val('q-ra'), recommendReject: val('q-rr') }));
+    case 'qc-disp': return act('Disposition recorded', async (c) => qc.dispositionInspection(c, { inspectionId: S.inspId, expectedVersion: await insVer(c), acceptQty: val('d-acc'), rejectQty: val('d-rej') }));
+    case 'reserve': return act('Stock reserved', (c) => inv.reserveStock(c, { lotId: S.lotId, qty: val('s-qty'), demandType: 'cut_order', demandRef: val('s-ref') }));
+    case 'putaway': return act('Stock moved', async (c) => {
+      const from = (await c.db.query(`SELECT location_id FROM stock_ledger WHERE lot_id=$1 AND status='ACCEPTED' GROUP BY location_id HAVING SUM(qty) > 0 ORDER BY SUM(qty) DESC LIMIT 1`, [S.lotId])).rows[0];
+      if (!from) throw Object.assign(new Error('There is no accepted stock on this roll to move'), { code: 'NOTHING_TO_MOVE' });
+      return inv.putaway(c, { lotId: S.lotId, fromLocationId: from.location_id, toLocationId: val('p-to'), qty: val('p-qty') });
+    });
+    case 'adjust': return act('Adjustment proposed. A different person must approve it', async (c) => {
+      const at = (await c.db.query(`SELECT location_id FROM stock_ledger WHERE lot_id=$1 AND status='ACCEPTED' GROUP BY location_id HAVING SUM(qty) > 0 ORDER BY SUM(qty) DESC LIMIT 1`, [S.lotId])).rows[0];
+      return inv.proposeAdjustment(c, { lotId: S.lotId, locationId: at?.location_id ?? world.loc.rcv, qtyDelta: val('a-qty'), reason: val('a-reason') });
+    });
+  }
+});
+const insVer = async (c: { db: Db }) => (await c.db.query('SELECT version FROM qc_inspection WHERE id=$1', [S.inspId])).rows[0].version as number;
+
+document.addEventListener('change', (ev) => {
+  const t = ev.target as HTMLInputElement;
+  if (t.id === 'who') { S.user = t.value; try { localStorage.setItem('erp-user', S.user); } catch { /* optional */ } render(); }
+  if (t.hasAttribute('data-reload-po')) { S.poId = t.value; render(); }
+});
+document.addEventListener('input', (ev) => {
+  const t = ev.target as HTMLInputElement;
+  if (t.id === 'filter') { S.filter = t.value; render(); }
+});
+document.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { const r = (ev.target as HTMLElement).closest('tr.pick') as HTMLElement | null; if (r) r.click(); } });
+
+// ───────────── boot ─────────────
+const dbName = () => `erp-demo-${__BUILD_ID__}`;
+async function boot() {
+  const stage = (s: string) => { $('#boot-msg').textContent = s; };
+  try {
+    stage('Loading the database engine…');
+    const base = new URL('.', document.baseURI).href;
+    const [wasm, initdb, data] = await Promise.all([
+      WebAssembly.compileStreaming(fetch(base + 'engine/pglite.wasm')),
+      WebAssembly.compileStreaming(fetch(base + 'engine/initdb.wasm')),
+      fetch(base + 'engine/pglite-data.ogg').then((r) => r.blob()),
+    ]);
+    stage('Starting PostgreSQL in your browser…');
+    const opts = { pgliteWasmModule: wasm, initdbWasmModule: initdb, fsBundle: data };
+    try { pool = await LitePool.create('idb://' + dbName(), opts); }
+    catch { pool = await LitePool.create(undefined, opts); }   // storage blocked: run in memory
+    world = await openWorld(pool, stage);
+    try { const u = localStorage.getItem('erp-user'); if (u && PEOPLE[u]) S.user = u; } catch { /* optional */ }
+    const h = location.hash.slice(1) as View; if (NAV.some((n) => n.id === h)) S.view = h;
+    $('#boot').remove();
+    await render();
+  } catch (e) {
+    $('#boot-msg').textContent = 'The demo could not start: ' + (e as Error).message;
+    $('#boot').classList.add('failed');
+    console.error(e);
+  }
+}
+(window as unknown as { __erp: unknown }).__erp = { S };
+void boot();

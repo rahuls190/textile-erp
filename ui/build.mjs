@@ -1,0 +1,31 @@
+import { build } from 'esbuild';
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { resolve } from 'node:path';
+
+const root = resolve(import.meta.dirname, '..');
+const out = resolve(root, 'ui/out');
+mkdirSync(resolve(out, 'engine'), { recursive: true });
+
+const shim = {
+  name: 'browser-shims',
+  setup(b) {
+    const to = (re, file) => b.onResolve({ filter: re }, () => ({ path: resolve(root, file) }));
+    to(/^node:crypto$/, 'ui/shims/crypto.ts');
+    to(/core\/auth(\.js)?$/, 'ui/shims/auth.ts');
+    to(/(^|\/)migrate(\.js)?$/, 'ui/shims/migrate.ts');
+  },
+};
+const sig = createHash('sha1').update(readFileSync(resolve(root, 'src/db/migrations/001_init.sql'))).digest('hex').slice(0, 8);
+await build({
+  entryPoints: [resolve(root, 'ui/main.ts')],
+  outfile: resolve(out, 'app.js'),
+  bundle: true, format: 'esm', platform: 'browser', target: 'es2022', minify: true, legalComments: 'none',
+  loader: { '.sql': 'text' },
+  define: { __BUILD_ID__: JSON.stringify(sig), 'process.env.NODE_ENV': '"production"' },
+  plugins: [shim],
+  logLevel: 'warning',
+});
+const pg = resolve(root, 'node_modules/@electric-sql/pglite/dist');
+for (const f of ['pglite.wasm', 'initdb.wasm', 'pglite.data']) copyFileSync(resolve(pg, f), resolve(out, 'engine', f));
+console.log('built', sig);
