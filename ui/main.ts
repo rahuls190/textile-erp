@@ -1,3 +1,5 @@
+import { setCurrent, DEFAULT_PREFS } from './prefs.js';
+import { getPreferences } from '../src/domain/prefs.js';
 import { LitePool } from './lite-pool.js';
 import { openWorld, isSeeded } from './world.js';
 import { runWorkedExample } from './walkthrough.js';
@@ -346,8 +348,10 @@ let queued = false;
 function scheduleRender() { if (queued) return; queued = true; setTimeout(() => { queued = false; void render(); }, 0); }
 R.scheduleRender = scheduleRender;
 
+let prefsFor = '';
 async function render() {
-  if (!S.user) { $('#app').innerHTML = loginScreen(loginError); return; }
+  if (!S.user) { if (prefsFor) { prefsFor = ''; setCurrent(DEFAULT_PREFS); } $('#app').innerHTML = loginScreen(loginError); return; }
+  if (prefsFor !== S.user) { prefsFor = S.user; setCurrent(await read((db) => getPreferences(db, uid()))); }
   const keep = { y: window.scrollY, f: document.activeElement?.id };
   await computeVis();
   if (S.mustChange) S.view = 'account';

@@ -1,7 +1,9 @@
 import init from '../../src/db/migrations/001_init.sql';
 import adminHr from '../../src/db/migrations/002_admin_hr.sql';
+import prefsSql from '../../src/db/migrations/003_preferences.sql';
 export async function migrate(pool: { query(t: string): Promise<unknown> }): Promise<string[]> {
   await pool.query(init as string);
   await pool.query(adminHr as string);
-  return ['001_init.sql', '002_admin_hr.sql'];
+  await pool.query(prefsSql as string);
+  return ['001_init.sql', '002_admin_hr.sql', '003_preferences.sql'];
 }

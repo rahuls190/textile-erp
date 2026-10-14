@@ -1,3 +1,5 @@
+import * as prefs from '../src/domain/prefs.js';
+import { ACCENTS, PREF_OPTIONS, getCurrent, setCurrent, type Preferences } from './prefs.js';
 import { html, raw, when, chip, type Raw } from './lib.js';
 import { K, S, uid, read, val, act, head, kv, denied, toast, R, todayIso, addDays } from './ctx.js';
 import * as admin from '../src/domain/admin.js';
@@ -112,6 +114,14 @@ export async function signinsView(): Promise<Raw> {
 // ───────────── My account ─────────────
 export async function accountView(): Promise<Raw> {
   const d = await read(async (db) => ({ access: await q.myAccess(db, uid()), me: (await db.query('SELECT username, display_name, last_login_at FROM app_user WHERE id=$1', [uid()])).rows[0] }));
+  const pf = getCurrent();
+  const seg = (k: keyof Preferences, opts: readonly string[], labels: Record<string, string>) => html`<div class="seg" role="group" aria-label="${k}">${opts.map((o) => html`<button type="button" data-pref="${k}:${o}" aria-pressed="${pf[k] === o}">${labels[o] ?? o}</button>`)}</div>`;
+  const appearance = html`<div class="card"><h2>Appearance</h2><p class="sub">Your own settings. They follow you to any device and never change what anyone else sees.</p>
+      <div class="prefrow"><span>Theme</span>${seg('theme', PREF_OPTIONS.theme, { system: 'Match device', light: 'Light', dark: 'Dark' })}</div>
+      <div class="prefrow"><span>Colour</span><div class="swatches">${PREF_OPTIONS.accent.map((a) => html`<button type="button" class="swatch" data-pref="accent:${a}" aria-pressed="${pf.accent === a}"><i style="background:${ACCENTS[a].l[0]}"></i>${ACCENTS[a].name}</button>`)}</div></div>
+      <div class="prefrow"><span>Layout</span>${seg('layout', PREF_OPTIONS.layout, { sidebar: 'Side menu', topbar: 'Top menu' })}</div>
+      <div class="prefrow"><span>Density</span>${seg('density', PREF_OPTIONS.density, { comfortable: 'Comfortable', compact: 'Compact' })}</div>
+      <div class="row" style="margin-top:12px"><button type="button" data-act="pref-reset">Back to defaults</button></div></div>`;
   return html`
   ${head('My account', S.mustChange ? 'You are signing in with a temporary password. Choose your own to continue.' : 'Your sign-in and what you are allowed to do.')}
   <section class="cols">
@@ -121,6 +131,7 @@ export async function accountView(): Promise<Raw> {
       <label>New password again<input id="pw-new2" type="password" autocomplete="new-password" /></label>
       <p class="note">Changing it signs you out everywhere else. In this demo every account starts with the password shown on the sign-in page.</p>
       <button class="primary" type="submit">Change password</button></form>
+    ${appearance}
     <div class="card"><h2>${d.me.display_name}</h2><p class="sub">${d.me.username} · last sign-in ${d.me.last_login_at ? when(d.me.last_login_at) : 'first time'}</p>
       <h3>What I hold</h3>${d.access.length ? html`<ul class="plain">${d.access.map((a) => html`<li><b>${a.role}</b> · ${a.site ?? 'all sites'}${a.max_amount ? ` · limit ${Number(a.max_amount).toLocaleString('en-IN')}` : ''}${a.valid_until ? ` · until ${String(a.valid_until).slice(0, 10)}` : ''}</li>`)}</ul>` : html`<p class="empty">No roles. You can sign in, and see only your own HR record.</p>`}</div>
   </section>`;
@@ -129,10 +140,13 @@ export async function accountView(): Promise<Raw> {
 // ───────────── events ─────────────
 const tempPw = () => val('u-temp');
 export async function onClick(t: HTMLElement): Promise<boolean> {
+  const pv = (t.closest('[data-pref]') as HTMLElement | null)?.dataset.pref;
+  if (pv) { const [k, val2] = pv.split(':'); const r = await act('Saved', (c) => prefs.setPreferences(c, { [k]: val2 } as Partial<Preferences>)); if (r) { setCurrent(r as Preferences); await R.render(); } return true; }
   const pu = (t.closest('[data-pick-user]') as HTMLElement | null)?.dataset.pickUser; if (pu) { S.userSel = pu; await R.render(); return true; }
   const pr = (t.closest('[data-pick-role]') as HTMLElement | null)?.dataset.pickRole; if (pr) { S.roleSel = pr; S.roleDraft = null; await R.render(); return true; }
   const b = t.closest('[data-act]') as HTMLElement | null; if (!b) return false;
   const a = b.dataset.act!, id = b.dataset.id ?? '';
+  if (a === 'pref-reset') { const r = await act('Appearance reset', (c) => prefs.setPreferences(c, { reset: true })); if (r) { setCurrent(r as Preferences); await R.render(); } return true; }
   switch (a) {
     case 'toggle-newuser': S.open.has('newuser') ? S.open.delete('newuser') : S.open.add('newuser'); await R.render(); return true;
     case 'toggle-newrole': S.open.has('newrole') ? S.open.delete('newrole') : S.open.add('newrole'); await R.render(); return true;

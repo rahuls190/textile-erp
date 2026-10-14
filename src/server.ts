@@ -5,6 +5,7 @@ import { migrate } from './migrate.js';
 import { actorFromToken, login, logout, changeOwnPassword } from './core/auth.js';
 import { runCommand, type Actor, type Ctx } from './core/command.js';
 import { AppError, badRequest, unauthorized } from './core/errors.js';
+import * as prefs from './domain/prefs.js';
 import * as admin from './domain/admin.js';
 import * as masters from './domain/masters.js';
 import * as po from './domain/po.js';
@@ -79,6 +80,9 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
   const ev = z.object({ expectedVersion: ver });
 
   // ── session / reads ──
+  app.get('/api/me/preferences', read((db, a) => prefs.getPreferences(db, a.id)));
+  cmd('/api/me/preferences', 'user.preferences', z.object({ theme: z.string().optional(), accent: z.string().optional(), layout: z.string().optional(), density: z.string().optional(), reset: z.boolean().optional() }),
+    (c, b) => prefs.setPreferences(c, b.reset ? { reset: true } : (b as never)));
   app.get('/api/me', read((db, a) => q.myAccess(db, a.id).then((access) => ({ user: a.username, access }))));
   app.get('/api/items', read((db, a) => q.listItems(db, a.id)));
   app.get('/api/partners', read((db, a) => q.listPartners(db, a.id)));

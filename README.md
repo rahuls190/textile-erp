@@ -15,7 +15,7 @@ npm install
 npm run migrate                 # create the schema
 npm run seed:demo               # demo company, site, roles, users (password: Demo-Passw0rd!  — dev only)
 npm start                       # API on http://localhost:3000
-npm test                        # 79 tests, each file on a fresh database
+npm test                        # 81 tests, each file on a fresh database
 ```
 
 Try it: `POST /api/login` → use the token as `Authorization: Bearer …`. **Every write needs an `Idempotency-Key`
@@ -35,6 +35,7 @@ Demo logins use the password above; the login screen has one-click person chips.
 | Real login: password strength, **lockout after 5 failures (15 min)**, forced change after a reset, sign-in log, session list, change own password (ends other sessions) | ✅ |
 | Users: create, edit, suspend/reactivate, unlock, reset password (ends sessions) | ✅ |
 | Roles are data: assign per site with amount limit and expiry, revoke with reason, **edit role permissions and descriptions** (reason required), add custom roles, delete unused roles | ✅ |
+| Per-user appearance (theme, colour, layout, density), saved on the account and applied on any device | ✅ |
 | Guards: no self-access changes, never remove the last administrator; the admin role keeps user, role and access management and cannot be deleted | ✅ |
 | HR: employee register (site-scoped, bank masked), departments, designations, shifts, holidays | ✅ |
 | Attendance (P/A/H/L/LWP/WO/HOL, late/overtime from the shift), locked once payroll is approved | ✅ |
