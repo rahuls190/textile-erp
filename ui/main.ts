@@ -265,6 +265,7 @@ const ICONS: Record<string, string> = {
 const icon = (id: string) => raw(`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[id] ?? ICONS.overview}"/></svg>`);
 const initials = (n: string) => n.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
 
+const navOpen = new Set<string>();
 const ALL_ITEMS = GROUPS.flatMap((g) => g.items);
 // ───────────── shell ─────────────
 const DEMO_NOTE = 'Demo data lives only in this browser. Every account uses the password shown here.';
@@ -278,7 +279,7 @@ function shell(content: Raw): string {
     <div class="workspace"><b>Kalyani Plant 1</b><small>Demo data, this browser only</small></div>
     <div class="nav-scroll"><nav class="side" aria-label="Sections">
       <a href="#overview" class="${S.view === 'overview' ? 'on' : ''}" data-view="overview">${icon('overview')}Overview</a>
-      ${GROUPS.filter((g) => (g.key !== 'ops' || vis.ops) && (g.key !== 'control' || vis.owner || vis.esc) && (g.key !== 'reports' || vis.rep) && (g.key !== 'sales' || vis.sales) && (g.key !== 'masters' || vis.masters)).map((g) => html`<div class="grp">${g.title}</div>${items(g).map((n) => html`<a href="#${n.id}" class="${n.id === S.view ? 'on' : ''}" data-view="${n.id}" title="${n.hint}">${icon(n.id)}${n.label}</a>`)}`)}
+      ${GROUPS.filter((g) => (g.key !== 'ops' || vis.ops) && (g.key !== 'control' || vis.owner || vis.esc) && (g.key !== 'reports' || vis.rep) && (g.key !== 'sales' || vis.sales) && (g.key !== 'masters' || vis.masters)).map((g) => { const its = items(g); const has = its.some((n) => n.id === S.view); if (has) navOpen.add(g.key); const o = navOpen.has(g.key); return html`<button type="button" class="grp ${o ? 'open' : ''} ${has ? 'cur' : ''}" data-grp="${g.key}" aria-expanded="${o}">${g.title}<span class="grp-n">${its.length}</span>${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>')}</button><div class="grp-items ${o ? '' : 'shut'}" data-items="${g.key}">${its.map((n) => html`<a href="#${n.id}" class="${n.id === S.view ? 'on' : ''}" data-view="${n.id}" title="${n.hint}">${icon(n.id)}${n.label}</a>`)}</div>`; })}
     </nav></div>
     <div class="side-bottom"><button class="ghost reset" data-act="reset">Reset demo data</button></div>
   </aside>
@@ -387,6 +388,8 @@ document.addEventListener('click', async (ev) => {
   const t = ev.target as HTMLElement;
   const fill = t.closest('[data-fill]') as HTMLElement | null;
   if (fill) { (document.getElementById('lg-user') as HTMLInputElement).value = fill.dataset.fill!; (document.getElementById('lg-pass') as HTMLInputElement).value = DEMO_PASSWORD; (document.getElementById('lg-pass') as HTMLElement).focus(); return; }
+  const gh = t.closest('[data-grp]') as HTMLElement | null;
+  if (gh) { const k = gh.dataset.grp!; const box = document.querySelector(`[data-items="${k}"]`); const o = !navOpen.has(k); o ? navOpen.add(k) : navOpen.delete(k); gh.classList.toggle('open', o); gh.setAttribute('aria-expanded', String(o)); box?.classList.toggle('shut', !o); return; }
   const nav = t.closest('[data-view]') as HTMLElement | null;
   if (nav) { ev.preventDefault(); if (S.mustChange) return toast('Choose a new password first', 'bad'); S.view = nav.dataset.view as View; history.replaceState(null, '', '#' + S.view); return render(); }
   if (await A.onClick(t)) return;
