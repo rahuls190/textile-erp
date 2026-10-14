@@ -27,6 +27,7 @@ await build({
   logLevel: 'warning',
 });
 const pg = resolve(root, 'node_modules/@electric-sql/pglite/dist');
+copyFileSync(resolve(root, 'ui/kalyani-logo.png'), resolve(out, 'kalyani-logo.png'));
 for (const [f, to] of [['pglite.wasm', 'pglite.wasm'], ['initdb.wasm', 'initdb.wasm'], ['pglite.data', 'pglite-data.ogg']]) copyFileSync(resolve(pg, f), resolve(out, 'engine', to));
 import { execFileSync } from 'node:child_process';
 execFileSync('npx', ['tsx', 'ui/make-snapshot.ts'], { cwd: root, stdio: 'inherit' });

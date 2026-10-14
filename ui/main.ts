@@ -271,6 +271,16 @@ async function auditView(): Promise<Raw> {
 }
 
 
+const ICONS: Record<string, string> = {
+  overview: 'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z', po: 'M2 3h3l3 12h11l3-9H6 M10 20h.01M18 20h.01', receiving: 'm3 7 9-4 9 4v10l-9 4-9-4z M3 7l9 4 9-4 M12 11v10',
+  quality: 'm12 2 9 4v6c0 5-9 10-9 10S3 17 3 12V6z m-5 10 3 3 5-6', stock: 'M3 3v18h18 M7 15l4-5 4 2 6-8', audit: 'M14 2H4v20h16V8z M14 2v6h6 M8 12h8M8 16h8',
+  employees: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M20 21v-2a4 4 0 0 0-3-4 M17 3a4 4 0 0 1 0 8', attendance: 'M12 8v5l3 2 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
+  leave: 'M3 5h18v16H3z M3 10h18 M8 3v4 M16 3v4', payroll: 'M3 5h17v15H3z M3 5V3h14 M15 10h7v6h-7z', users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
+  roles: 'm12 2 9 4v6c0 5-9 10-9 10S3 17 3 12V6z', signins: 'M10 13a5 5 0 0 0 7 0l4-4a5 5 0 0 0-7-7l-2 2 M14 11a5 5 0 0 0-7 0l-4 4a5 5 0 0 0 7 7l2-2' };
+const icon = (id: string) => raw(`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[id] ?? ICONS.overview}"/></svg>`);
+const initials = (n: string) => n.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
+
+const ALL_ITEMS = GROUPS.flatMap((g) => g.items);
 // ───────────── shell ─────────────
 const DEMO_NOTE = 'Demo data lives only in this browser. Every account uses the password shown here.';
 
@@ -278,20 +288,25 @@ function shell(content: Raw): string {
   const me = PEOPLE[S.user] ?? { name: S.user, role: '' };
   const items = (g: (typeof GROUPS)[number]) => g.items.filter((n) => (g.key === 'admin' ? (n.id === 'roles' || (n.id === 'audit' ? vis.audit : vis.users)) : true));
   return html`
+  <aside class="sidebar">
+    <div class="brand"><img class="brand-logo" src="kalyani-logo.png" alt="Kalyani" /><span class="erp-label">Operations ERP · demo</span></div>
+    <div class="workspace"><b>Kalyani Plant 1</b><small>Demo data, this browser only</small></div>
+    <div class="nav-scroll"><nav class="side" aria-label="Sections">
+      <a href="#overview" class="${S.view === 'overview' ? 'on' : ''}" data-view="overview">${icon('overview')}Overview</a>
+      ${GROUPS.filter((g) => g.key !== 'ops' || vis.ops).map((g) => html`<div class="grp">${g.title}</div>${items(g).map((n) => html`<a href="#${n.id}" class="${n.id === S.view ? 'on' : ''}" data-view="${n.id}" title="${n.hint}">${icon(n.id)}${n.label}</a>`)}`)}
+    </nav></div>
+    <div class="side-bottom"><button class="ghost reset" data-act="reset">Reset demo data</button></div>
+  </aside>
+  <div class="shell">
   <header class="top">
-    <div class="brand"><span class="mark" aria-hidden="true"></span><div><b>Textile ERP</b><small>Kalyani Plant 1 · demo data</small></div></div>
+    <div class="crumbs">Kalyani Plant 1 / <b>${S.view === 'overview' ? 'Overview' : (ALL_ITEMS.find((i) => i.id === S.view)?.label ?? 'My account')}</b></div>
     <div class="who">
       <label class="actor"><span>Demo: switch person</span>
         <select id="who" aria-label="Switch person (demo shortcut: signs in with the demo password)">${ORDER.filter((k) => K.world.actors[k]).map((k) => html`<option value="${k}" ${k === S.user ? raw('selected') : ''}>${PEOPLE[k].name} — ${PEOPLE[k].role.split(' · ')[0]}</option>`)}</select></label>
-      <button class="ghost" data-view="account" title="My account">${me.name}</button><button data-act="signout">Sign out</button>
+      <button class="ghost" data-view="account" title="My account" style="display:flex;align-items:center;gap:8px"><span class="avatar">${initials(me.name)}</span>${me.name}</button><button data-act="signout">Sign out</button>
     </div>
   </header>
-  <div class="frame">
-    <nav class="side" aria-label="Sections">
-      <a href="#overview" class="${S.view === 'overview' ? 'on' : ''}" data-view="overview"><b>Overview</b><small>Your access and the worked examples</small></a>
-      ${GROUPS.filter((g) => g.key !== 'ops' || vis.ops).map((g) => html`<div class="grp">${g.title}</div>${items(g).map((n) => html`<a href="#${n.id}" class="${n.id === S.view ? 'on' : ''}" data-view="${n.id}"><b>${n.label}</b><small>${n.hint}</small></a>`)}`)}
-      <button class="ghost reset" data-act="reset">Reset demo data</button></nav>
-    <main id="main" aria-live="polite" aria-label="${me.role}">${S.mustChange ? html`<div class="pending"><b>Choose a new password to continue</b><span>You signed in with a temporary password.</span></div>` : ''}${content}</main>
+  <main id="main" class="content" aria-live="polite" aria-label="${me.role}">${S.mustChange ? html`<div class="pending"><b>Choose a new password to continue</b><span>You signed in with a temporary password.</span></div>` : ''}${content}</main>
   </div>`.s;
 }
 
@@ -300,7 +315,7 @@ function loginScreen(error = ''): string {
   return html`
   <div class="login">
     <form class="card form" data-form="login" autocomplete="off">
-      <div class="brand"><span class="mark" aria-hidden="true"></span><div><b>Textile ERP</b><small>Kalyani Plant 1 · demo</small></div></div>
+      <div class="brand"><img class="brand-logo logo-login" src="kalyani-logo.png" alt="Kalyani" /></div>
       <h1>Sign in</h1>
       <label>Username<input id="lg-user" autocapitalize="none" spellcheck="false" autocomplete="username" /></label>
       <label>Password<input id="lg-pass" type="password" autocomplete="current-password" /></label>
