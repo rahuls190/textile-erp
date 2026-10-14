@@ -20,6 +20,8 @@ import * as qc from './domain/qc.js';
 import * as inv from './domain/inventory.js';
 import * as q from './domain/queries.js';
 import * as mdata from './domain/master-data.js';
+import * as aim from './domain/ai-models.js';
+import * as agent from './domain/agent.js';
 import * as hr from './domain/hr.js';
 
 declare module 'fastify' { interface FastifyRequest { actor: Actor } }
@@ -110,6 +112,21 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
   app.get('/api/parties/:id', read((db, a, r) => mdata.getParty(db, a.id, (r.params as { id: string }).id)));
   cmd('/api/parties', 'partner.create', z.object({ name: z.string(), role: z.enum(['vendor', 'customer', 'both', 'subcontractor']), gstin: z.string().optional(), pan: z.string().optional(), city: z.string().optional(), state: z.string().optional(), phone: z.string().optional(), email: z.string().optional(), paymentDays: z.number().int().optional(), bankAccount: z.string().optional() }), (c, b) => mdata.createParty(c, b), true);
   cmd('/api/parties/import', 'partner.create', z.object({ csv: z.string(), dryRun: z.boolean().optional() }), (c, b) => mdata.importParties(c, b.csv, b.dryRun));
+  // AI models (owner and administrator) and the assistant
+  const kindZ = z.enum(['anthropic', 'openai', 'google', 'openai_compatible']);
+  app.get('/api/ai/overview', read((db, a) => aim.overview(db, a.id)));
+  app.get('/api/ai/calls', read((db, a) => aim.recentCalls(db, a.id)));
+  cmd('/api/ai/providers', 'ai.provider.add', z.object({ name: z.string(), kind: kindZ, baseUrl: z.string().optional(), apiKey: z.string().optional() }), (c, b) => aim.addProvider(c, b), true);
+  cmd('/api/ai/providers/:id/update', 'ai.provider.update', z.object({ expectedVersion: ver, name: z.string().optional(), baseUrl: z.string().optional(), apiKey: z.string().optional(), clearKey: z.boolean().optional(), enabled: z.boolean().optional() }), (c, b, p) => aim.updateProvider(c, { id: p.id, ...b }));
+  cmd('/api/ai/providers/:id/remove', 'ai.provider.remove', none, (c, _b, p) => aim.removeProvider(c, { id: p.id }));
+  cmd('/api/ai/models', 'ai.model.add', z.object({ providerId: id, modelId: z.string(), label: z.string().optional(), maxTokens: z.number().int().optional(), temperature: z.number().optional() }), (c, b) => aim.addModel(c, b), true);
+  cmd('/api/ai/models/:id/update', 'ai.model.update', z.object({ label: z.string().optional(), modelId: z.string().optional(), enabled: z.boolean().optional(), maxTokens: z.number().int().optional(), temperature: z.number().optional() }), (c, b, p) => aim.updateModel(c, { id: p.id, ...b }));
+  cmd('/api/ai/models/:id/remove', 'ai.model.remove', none, (c, _b, p) => aim.removeModel(c, { id: p.id }));
+  cmd('/api/ai/assign', 'ai.assign', z.object({ purpose: z.enum(['assistant', 'reports']), modelId: id.nullable(), fallbackId: id.nullable().optional() }), (c, b) => aim.assignModel(c, b));
+  app.post('/api/ai/models/:id/test', read((db, a, r) => aim.testModel(db, a.id, (r.params as { id: string }).id)));
+  app.get('/api/agent/capabilities', read((db, a) => agent.capabilities(db, a.id)));
+  app.post('/api/agent/chat', read(async (db, a, r) => { const b = z.object({ text: z.string().max(500), history: z.array(z.object({ role: z.enum(['user', 'assistant']), text: z.string().max(500) })).max(10).optional() }).parse(r.body ?? {}); return agent.chat(db, a.id, b.text, b.history ?? []); }));
+  cmd('/api/agent/confirm', 'assistant.confirm', z.object({ tool: z.string(), args: z.record(z.string(), z.string()), title: z.string().max(200), details: z.array(z.string()).max(10).optional() }), async (c, b) => ({ message: await agent.executeProposal(c, { tool: b.tool, args: b.args, title: b.title, details: b.details ?? [] }) }));
   app.get('/api/customers', read((db, a) => sales.listCustomers(db, a.id)));
   cmd('/api/customers/:id/terms', 'customer.terms', z.object({ creditLimit: z.string(), paymentDays: z.number().int().optional() }), (c, b, p) => sales.setCreditTerms(c, { partnerId: p.id, ...b }));
   app.get('/api/quotes', read((db, a) => sales.listQuotes(db, a.id)));
@@ -143,7 +160,7 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
   // Describe a report in words; the assistant returns a spec and the report is run as the caller (audited, same rights as any report)
   app.post('/api/reports/ask', read(async (db, a, req) => {
     const b = z.object({ question: z.string().max(400) }).parse(req.body ?? {});
-    const it = await ai.interpret(db, a.id, b.question, aiProvider);
+    const it = await ai.interpret(db, a.id, b.question, (await aim.reportsProvider(db, a.id)) ?? aiProvider);
     return { ...it, result: await custom.runCustom(db, a, it.spec, it.source === 'ai' ? 'ai' : 'manual', b.question) };
   }));
   app.post('/api/reports/custom/run', read((db, a, req) => custom.runCustom(db, a, (req.body as { spec?: unknown } | undefined)?.spec)));

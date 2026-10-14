@@ -22,6 +22,8 @@ import * as O2 from './views-overview.js';
 import * as B from './views-barcode.js';
 import * as SL from './views-sales.js';
 import * as MX from './views-masters.js';
+import * as AI from './views-ai.js';
+import * as AG from './agent-ui.js';
 import * as P0 from '../src/domain/reports.js';
 
 declare const __BUILD_ID__: string;
@@ -57,11 +59,12 @@ const GROUPS: { title: string; key: 'control' | 'reports' | 'sales' | 'masters' 
     { id: 'users', label: 'Users', hint: 'Sign-ins, roles, suspension' },
     { id: 'roles', label: 'Roles & permissions', hint: 'Who is allowed what' },
     { id: 'audit', label: 'Audit trail', hint: 'Who did what' },
-    { id: 'signins', label: 'Sign-in log', hint: 'Every attempt' } ] },
+    { id: 'signins', label: 'Sign-in log', hint: 'Every attempt' },
+    { id: 'aimodels', label: 'AI models', hint: 'Connect AI services' } ] },
 ];
 const ALL_VIEWS: View[] = ['overview', 'account', ...GROUPS.flatMap((g) => g.items.map((i) => i.id))];
 
-let vis = { ops: true, users: false, audit: false, owner: false, esc: false, rep: false, masters: false, mat: false, ven: false, cli: false, sales: false, crm: false, quotes: false, sord: false };
+let vis = { ops: true, users: false, audit: false, owner: false, esc: false, rep: false, masters: false, ai: false, mat: false, ven: false, cli: false, sales: false, crm: false, quotes: false, sord: false };
 const rollBar = (r: { held: string; accepted: string; rejected: string; reserved: string; available: string }) => {
   const held = Number(r.held), rej = Number(r.rejected), res = Number(r.reserved), av = Math.max(Number(r.available), 0);
   const tot = held + rej + res + av || 1;
@@ -257,7 +260,7 @@ const ICONS: Record<string, string> = {
   quality: 'm12 2 9 4v6c0 5-9 10-9 10S3 17 3 12V6z m-5 10 3 3 5-6', stock: 'M3 3v18h18 M7 15l4-5 4 2 6-8', audit: 'M14 2H4v20h16V8z M14 2v6h6 M8 12h8M8 16h8',
   employees: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0 M20 21v-2a4 4 0 0 0-3-4 M17 3a4 4 0 0 1 0 8', attendance: 'M12 8v5l3 2 M22 12a10 10 0 1 1-20 0 10 10 0 0 1 20 0',
   leave: 'M3 5h18v16H3z M3 10h18 M8 3v4 M16 3v4', payroll: 'M3 5h17v15H3z M3 5V3h14 M15 10h7v6h-7z', users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2 M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0',
-  owner: 'M3 3h18v6H3z M3 13h8v8H3z M15 13h6v8h-6z', escalations: 'M12 2 2 20h20z M12 9v5 M12 17h.01', crm: 'M16 11a4 4 0 1 0-8 0 M4 21a8 8 0 0 1 16 0', quotes: 'M6 3h9l4 4v14H6z M9 12h7 M9 16h7', materials: 'M4 7l8-4 8 4-8 4z M4 12l8 4 8-4 M4 17l8 4 8-4', mtypes: 'M3 6h18 M3 12h12 M3 18h8', vendors: 'M3 21V8l9-5 9 5v13 M9 21v-6h6v6', clients: 'M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2 M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M21 21v-2a4 4 0 0 0-3-3.9', sales: 'M3 17l5-5 4 4 8-9 M15 7h5v5', barcodes: 'M4 5v14 M7 5v14 M11 5v14 M14 5v14 M18 5v14 M21 5v14', reports: 'M4 20V10 M10 20V4 M16 20v-7 M22 20H2',
+  owner: 'M3 3h18v6H3z M3 13h8v8H3z M15 13h6v8h-6z', escalations: 'M12 2 2 20h20z M12 9v5 M12 17h.01', crm: 'M16 11a4 4 0 1 0-8 0 M4 21a8 8 0 0 1 16 0', quotes: 'M6 3h9l4 4v14H6z M9 12h7 M9 16h7', materials: 'M4 7l8-4 8 4-8 4z M4 12l8 4 8-4 M4 17l8 4 8-4', mtypes: 'M3 6h18 M3 12h12 M3 18h8', vendors: 'M3 21V8l9-5 9 5v13 M9 21v-6h6v6', clients: 'M17 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2 M10 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8 M21 21v-2a4 4 0 0 0-3-3.9', aimodels: 'M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z M19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z',  sales: 'M3 17l5-5 4 4 8-9 M15 7h5v5', barcodes: 'M4 5v14 M7 5v14 M11 5v14 M14 5v14 M18 5v14 M21 5v14', reports: 'M4 20V10 M10 20V4 M16 20v-7 M22 20H2',
   roles: 'm12 2 9 4v6c0 5-9 10-9 10S3 17 3 12V6z', signins: 'M10 13a5 5 0 0 0 7 0l4-4a5 5 0 0 0-7-7l-2 2 M14 11a5 5 0 0 0-7 0l-4 4a5 5 0 0 0 7 7l2-2' };
 const icon = (id: string) => raw(`<svg viewBox="0 0 24 24" aria-hidden="true"><path d="${ICONS[id] ?? ICONS.overview}"/></svg>`);
 const initials = (n: string) => n.split(/\s+/).map((w) => w[0]).slice(0, 2).join('').toUpperCase();
@@ -268,7 +271,7 @@ const DEMO_NOTE = 'Demo data lives only in this browser. Every account uses the 
 
 function shell(content: Raw): string {
   const me = PEOPLE[S.user] ?? { name: S.user, role: '' };
-  const items = (g: (typeof GROUPS)[number]) => g.items.filter((n) => (g.key === 'control' ? (n.id === 'owner' ? vis.owner : vis.esc) : g.key === 'masters' ? (n.id === 'vendors' ? vis.ven : n.id === 'clients' ? vis.cli : vis.mat) : g.key === 'sales' ? (n.id === 'crm' ? vis.crm : n.id === 'quotes' ? vis.quotes : vis.sord) : g.key === 'admin' ? (n.id === 'roles' || (n.id === 'audit' ? vis.audit : vis.users)) : true));
+  const items = (g: (typeof GROUPS)[number]) => g.items.filter((n) => (g.key === 'control' ? (n.id === 'owner' ? vis.owner : vis.esc) : g.key === 'masters' ? (n.id === 'vendors' ? vis.ven : n.id === 'clients' ? vis.cli : vis.mat) : g.key === 'sales' ? (n.id === 'crm' ? vis.crm : n.id === 'quotes' ? vis.quotes : vis.sord) : g.key === 'admin' ? (n.id === 'aimodels' ? vis.ai : n.id === 'roles' || (n.id === 'audit' ? vis.audit : vis.users)) : true));
   return html`
   <aside class="sidebar">
     <div class="brand"><img class="brand-logo" src="kalyani-logo.png" alt="Kalyani" /><span class="erp-label">Operations ERP · demo</span></div>
@@ -320,6 +323,7 @@ async function computeVis() {
     crm: await can(db, uid(), 'crm.view', { anySite: true }),
     quotes: await can(db, uid(), 'quote.create', { anySite: true }) || await can(db, uid(), 'sales.view', { anySite: true }),
     sord: await can(db, uid(), 'so.view', { anySite: true }),
+    ai: await can(db, uid(), 'ai.manage', { anySite: true }),
     mat: await can(db, uid(), 'item.view', { anySite: true }),
     ven: await can(db, uid(), 'partner.view', { anySite: true }),
     cli: await can(db, uid(), 'partner.view', { anySite: true }) || await can(db, uid(), 'so.view', { anySite: true }),
@@ -332,7 +336,7 @@ async function computeVis() {
 const VIEWS: Record<View, () => Promise<Raw>> = {
   overview, po: poView, receiving: receivingView, quality: qualityView, stock: stockView, audit: auditView,
   employees: H.employeesView, attendance: H.attendanceView, leave: H.leaveView, payroll: H.payrollView,
-  owner: O.ownerView, escalations: O.escalationsView, reports: P.reportsView, barcodes: B.barcodesView, crm: SL.crmView, quotes: SL.quotesView, sales: SL.salesView, materials: MX.materialsView, mtypes: MX.typesView, vendors: MX.vendorsView, clients: MX.clientsView, users: A.usersView, roles: A.rolesView, signins: A.signinsView, account: A.accountView,
+  owner: O.ownerView, escalations: O.escalationsView, reports: P.reportsView, barcodes: B.barcodesView, crm: SL.crmView, quotes: SL.quotesView, sales: SL.salesView, materials: MX.materialsView, mtypes: MX.typesView, vendors: MX.vendorsView, clients: MX.clientsView, aimodels: AI.aiView, users: A.usersView, roles: A.rolesView, signins: A.signinsView, account: A.accountView,
 };
 
 let queued = false;
@@ -350,7 +354,8 @@ async function render() {
   const content = await VIEWS[S.view]().catch((e) => html`<div class="card"><h2>Something went wrong</h2><p class="note">${(e as Error).message}</p></div>`);
   $('#app').innerHTML = shell(content);
   window.scrollTo(0, keep.y);
-  if (keep.f) (document.getElementById(keep.f) as HTMLElement | null)?.focus();
+  if (keep.f && !keep.f.startsWith('ag-')) (document.getElementById(keep.f) as HTMLElement | null)?.focus();
+  void AG.sync();
 }
 R.render = render;
 
@@ -391,6 +396,7 @@ document.addEventListener('click', async (ev) => {
   if (await B.onClick(t)) return;
   if (await SL.onClick(t)) return;
   if (await MX.onClick(t)) return;
+  if (await AI.onClick(t)) return;
   const pp = t.closest('[data-pick-po]') as HTMLElement | null; if (pp) { S.poId = pp.dataset.pickPo!; return render(); }
   const pq = t.closest('[data-pick-qc]') as HTMLElement | null; if (pq) { S.inspId = pq.dataset.pickQc!; return render(); }
   const pl = t.closest('[data-pick-lot]') as HTMLElement | null; if (pl) { S.lotId = S.lotId === pl.dataset.pickLot ? '' : pl.dataset.pickLot!; return render(); }
@@ -440,6 +446,7 @@ document.addEventListener('submit', async (ev) => {
   if (await B.onSubmit(f.dataset.form!)) return;
   if (await SL.onSubmit(f.dataset.form!, f)) return;
   if (await MX.onSubmit(f.dataset.form!, f, ev as SubmitEvent)) return;
+  if (await AI.onSubmit(f.dataset.form!, f)) return;
   switch (f.dataset.form) {
     case 'newpo': {
       const partnerId = val('f-vendor'), itemId = val('f-item');
@@ -472,6 +479,7 @@ document.addEventListener('change', async (ev) => {
     return render();
   }
   if (await MX.onChange(t)) return;
+  if (await AI.onChange(t)) return;
   if (t.dataset.perm) return A.togglePerm(t.dataset.perm);
   if (t.id === 'att-date' && t.value) { S.attDate = t.value; return render(); }
   if (t.hasAttribute('data-reload-po')) { S.poId = t.value; render(); }

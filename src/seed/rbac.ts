@@ -7,7 +7,7 @@ import type { Pool } from '../db/pool.js';
  */
 export const ROLES: Record<string, { description: string; perms: string[] }> = {
   ADM: { description: 'System / access administrator (no business approval power)',
-         perms: ['user.manage', 'user.view', 'access.assign', 'role.manage', 'site.provision', 'audit.view'] },
+         perms: ['user.manage', 'user.view', 'access.assign', 'role.manage', 'site.provision', 'audit.view', 'ai.manage'] },
   MD: { description: 'Master-data steward / managing director',
         perms: ['org.create', 'org.edit', 'unit.create', 'item.create', 'item.edit', 'item.submit', 'item.view',
                 'partner.create', 'partner.submit', 'partner.view', 'partner.edit', 'mtype.manage', 'inventory.view', 'po.view', 'hr.salary.propose', 'hr.salary.approve', 'escalation.raise', 'escalation.senior', 'escalation.view'] },
@@ -44,7 +44,7 @@ export const ROLES: Record<string, { description: string; perms: string[] }> = {
   HRE: { description: 'HR executive (no salary access)',
          perms: ['hr.employee.view', 'hr.employee.create', 'hr.employee.edit', 'hr.attendance.view', 'hr.attendance.mark', 'hr.leave.view'] },
   OWN: { description: 'Business owner (sees everything, can override approvals)',
-         perms: ['owner.view', 'owner.override', 'escalation.raise', 'escalation.senior', 'escalation.view', 'audit.view', 'user.view',
+         perms: ['ai.manage', 'owner.view', 'owner.override', 'escalation.raise', 'escalation.senior', 'escalation.view', 'audit.view', 'user.view',
                  'inventory.view', 'po.view', 'item.view', 'partner.view', 'receipt.view', 'qc.view',
                  'hr.employee.view', 'hr.attendance.view', 'hr.leave.view', 'hr.payroll.view', 'hr.salary.view', 'crm.view', 'sales.view', 'so.view'] },
   SAL: { description: 'Sales executive',
@@ -58,14 +58,14 @@ export const ROLES: Record<string, { description: string; perms: string[] }> = {
 /** Everyone who works in the business can raise an urgent-approval escalation and follow the ones they raised. */
 for (const [k, def] of Object.entries(ROLES)) {
   if (k === 'ADM' || k === 'AUD') continue;
-  for (const p of ['escalation.raise', 'escalation.view']) if (!def.perms.includes(p)) def.perms.push(p);
+  for (const p of ['escalation.raise', 'escalation.view', 'ai.use']) if (!def.perms.includes(p)) def.perms.push(p);
 }
 
 /** Display name for a permission key's area, used by the admin console. */
 export const AREAS: Record<string, string> = {
   user: 'Users', access: 'Access', role: 'Roles', site: 'Sites', audit: 'Audit', org: 'Organisation', unit: 'Units', item: 'Items',
   partner: 'Vendors & clients', mtype: 'Material types', rate: 'Rates', po: 'Purchase orders', receipt: 'Receiving', qc: 'Quality', putaway: 'Putaway',
-  owner: 'Owner', crm: 'CRM', sales: 'Sales', quote: 'Quotations', so: 'Sales orders', customer: 'Customers', dispatch: 'Dispatch', escalation: 'Escalations', reservation: 'Reservations', adjustment: 'Adjustments', location: 'Locations', inventory: 'Inventory', hr: 'HR & payroll',
+  owner: 'Owner', ai: 'AI models & assistant', crm: 'CRM', sales: 'Sales', quote: 'Quotations', so: 'Sales orders', customer: 'Customers', dispatch: 'Dispatch', escalation: 'Escalations', reservation: 'Reservations', adjustment: 'Adjustments', location: 'Locations', inventory: 'Inventory', hr: 'HR & payroll',
 };
 
 /** Every known permission, derived from the role catalogue (plus anything the console adds later). */

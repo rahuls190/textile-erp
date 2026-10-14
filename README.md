@@ -15,7 +15,7 @@ npm install
 npm run migrate                 # create the schema
 npm run seed:demo               # demo company, site, roles, users (password: Demo-Passw0rd!  — dev only)
 npm start                       # API on http://localhost:3000
-npm test                        # 140 tests, each file on a fresh database
+npm test                        # 161 tests, each file on a fresh database
 ```
 
 Try it: `POST /api/login` → use the token as `Authorization: Bearer …`. **Every write needs an `Idempotency-Key`
@@ -78,6 +78,8 @@ The escalation time limits (24 h for orders, adjustments and leave; 72 h salary;
 | W06 adjustments: propose → independent approve (band) → post; never type over a balance | ◐ (no count workflow) |
 | **CRM + sales**: leads → follow-ups → quotation (max 10% discount without extra right, 15-day validity) → order (banded approval, creator ≠ approver, credit-limit check) → stock hold → dispatch by storekeeper (immutable dispatch note, consumes the hold, posts the stock ledger) | ✅ (no invoice or payment yet) |
 | **Master data**: material types (what each type must record, code letters, tracking), materials with HSN / GST / reorder level and type-driven attributes (draft → independent approval, switch off only when nothing uses it), vendors and clients with GSTIN/PAN checks, contacts, addresses, payment days, suspend/reactivate (bank or GSTIN change sends an approved party back for checking), vendor price lists, units, and all-or-nothing CSV bulk add | ✅ |
+| **AI model registry** (owner/administrator only): add, edit, remove providers (Anthropic, OpenAI, Google, any OpenAI-compatible endpoint) and models, store API keys sealed with AES-GCM (only last 4 shown, never returned or audited), assign a primary and fallback model per job (assistant, reports), test a model, append-only call log | ✅ |
+| **AI assistant** with voice: floating helper that answers from the user's own permissions, opens screens, and prepares changes (leads, vendors, etc.) that only run after the user says yes (button or voice). Uses the assigned model, or a built-in reader when none is set | ✅ |
 | REST API + validation, clean errors, reads filtered by site scope | ✅ |
 
 The blueprint's own worked example (p.55: 500 m → 480 accepted / 20 rejected → reserve 120 → 360 left) and the
@@ -105,3 +107,9 @@ foundation for it) · data migration tooling. (The browser demo is a prototype i
 
 Network rate limiting, TLS termination, email/SMS password reset (today an administrator issues a temporary password), secrets management, backups + restore rehearsal (RPO 15 min / RTO 4 h targets),
 load testing from the site survey, and statutory validation with your CA — all listed in the blueprint's decision register (p.61).
+
+## AI models and assistant: notes
+
+* Set `AI_KEY_SECRET` on the server (used to seal provider keys). Live model calls need the server to reach the provider; the browser demo cannot, so it uses the built-in reader.
+* Voice uses the browser Web Speech API: Chrome or Edge on a normal web address (GitHub Pages works). The microphone is blocked inside the Claude artifact view.
+* Check the seeded model names against each provider's own model list before switching a provider on.
