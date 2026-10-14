@@ -124,6 +124,9 @@ export async function createRole(ctx: Ctx, i: { key: string; description: string
   return { key: i.key };
 }
 
+/** What the administrator role can never lose, so nobody can lock everyone out of access control. */
+export const ADM_FLOOR = ['user.manage', 'user.view', 'access.assign', 'role.manage'];
+
 async function writePermissions(db: Db, key: string, perms: string[]) {
   const defs = (await db.query('SELECT key, bandable FROM permission_def')).rows as { key: string; bandable: boolean }[];
   const known = new Map(defs.map((d) => [d.key, d.bandable]));
@@ -136,7 +139,10 @@ async function writePermissions(db: Db, key: string, perms: string[]) {
 export async function setRolePermissions(ctx: Ctx, i: { roleKey: string; permissions: string[]; reason: string }) {
   await assertCan(ctx.db, ctx.actor.id, 'role.manage');
   if (!i.reason) throw badRequest('A reason is required');
-  if (i.roleKey === 'ADM') throw forbidden('The administrator role is fixed so the system cannot be locked out');
+  if (i.roleKey === 'ADM') {
+    const missing = ADM_FLOOR.filter((p) => !i.permissions.includes(p));
+    if (missing.length) throw forbidden(`The administrator role must keep ${missing.join(', ')} so the system can never be locked out`);
+  }
   const role = (await ctx.db.query('SELECT key FROM role WHERE key=$1', [i.roleKey])).rows[0];
   if (!role) throw notFound(`Role ${i.roleKey}`);
   const before = (await ctx.db.query('SELECT permission FROM role_permission WHERE role_key=$1 ORDER BY permission', [i.roleKey])).rows.map((r) => r.permission);
@@ -146,11 +152,22 @@ export async function setRolePermissions(ctx: Ctx, i: { roleKey: string; permiss
   return { roleKey: i.roleKey, count: after.length };
 }
 
+export async function updateRole(ctx: Ctx, i: { roleKey: string; description: string; reason: string }) {
+  await assertCan(ctx.db, ctx.actor.id, 'role.manage');
+  if (!i.reason) throw badRequest('A reason is required');
+  if (!i.description.trim()) throw badRequest('A description is required');
+  const role = (await ctx.db.query('SELECT description FROM role WHERE key=$1', [i.roleKey])).rows[0];
+  if (!role) throw notFound(`Role ${i.roleKey}`);
+  await ctx.db.query('UPDATE role SET description=$2 WHERE key=$1', [i.roleKey, i.description.trim()]);
+  await audit(ctx, { action: 'role.update', entityType: 'role', before: { role: i.roleKey, description: role.description }, after: { role: i.roleKey, description: i.description.trim() }, reason: i.reason });
+  return { key: i.roleKey };
+}
+
 export async function deleteRole(ctx: Ctx, i: { roleKey: string }) {
   await assertCan(ctx.db, ctx.actor.id, 'role.manage');
   const role = (await ctx.db.query('SELECT is_system FROM role WHERE key=$1', [i.roleKey])).rows[0];
   if (!role) throw notFound(`Role ${i.roleKey}`);
-  if (role.is_system) throw forbidden('Built-in roles cannot be deleted');
+  if (i.roleKey === 'ADM') throw forbidden('The administrator role cannot be deleted');
   if ((await ctx.db.query('SELECT 1 FROM user_role WHERE role_key=$1 AND revoked_at IS NULL LIMIT 1', [i.roleKey])).rowCount) throw invalidState('Someone still holds this role. Revoke it first');
   await ctx.db.query('DELETE FROM role_permission WHERE role_key=$1', [i.roleKey]);
   await ctx.db.query('DELETE FROM user_role WHERE role_key=$1', [i.roleKey]);   // only revoked history remains

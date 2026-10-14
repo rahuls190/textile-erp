@@ -102,6 +102,7 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
   cmd('/api/access/:id/revoke', 'access.revoke', z.object({ reason: z.string().min(3) }), (c, b, p) => admin.revokeRole(c, { userRoleId: p.id, reason: b.reason }));
   cmd('/api/roles', 'role.create', z.object({ key: z.string(), description: z.string(), permissions: z.array(z.string()) }), (c, b) => admin.createRole(c, b), true);
   cmd('/api/roles/:key/permissions', 'role.permissions', z.object({ permissions: z.array(z.string()), reason: z.string().min(3) }), (c, b, p) => admin.setRolePermissions(c, { roleKey: p.key, ...b }));
+  cmd('/api/roles/:key/update', 'role.update', z.object({ description: z.string().min(2), reason: z.string().min(3) }), (c, b, p) => admin.updateRole(c, { roleKey: p.key, ...b }));
   cmd('/api/roles/:key/delete', 'role.delete', none, (c, _b, p) => admin.deleteRole(c, { roleKey: p.key }));
   app.get('/api/users', read((db, a) => admin.listUsers(db, a.id).then((r) => { if (!r) throw new AppError(403, 'FORBIDDEN', 'Not permitted: user.view'); return r; })));
   app.get('/api/login-events', read((db, a) => admin.listLoginEvents(db, a.id).then((r) => { if (!r) throw new AppError(403, 'FORBIDDEN', 'Not permitted: user.view'); return r; })));

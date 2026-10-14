@@ -68,7 +68,7 @@ export async function rolesView(): Promise<Raw> {
   if (S.roleSel !== role.key) { S.roleSel = role.key; S.roleDraft = null; }
   const saved = new Set(role.permissions);
   const draft = S.roleDraft ?? saved;
-  const locked = !d.edit || role.key === 'ADM';
+  const locked = !d.edit;
   const added = [...draft].filter((p) => !saved.has(p)), removed = [...saved].filter((p) => !draft.has(p));
   const areas = [...new Set(d.cat.map((p) => p.area))];
   const form = S.open.has('newrole') ? html`
@@ -87,14 +87,14 @@ export async function rolesView(): Promise<Raw> {
     </table></div></div>
     <aside class="card detail wide">
       <div class="dh"><h2>${role.key}</h2><span class="muted">${role.holders} holder${role.holders === 1 ? '' : 's'}</span></div>
-      <p class="sub">${role.description}</p>
-      ${role.key === 'ADM' ? html`<p class="note">The administrator role is fixed so the system can never be locked out. It carries no business approvals by design.</p>` : !d.edit ? html`<p class="note">You can read roles but not change them. Sign in as the System administrator to edit.</p>` : ''}
+      ${d.edit ? html`<form class="row editdesc" data-form="roledesc"><input id="role-desc" value="${role.description}" aria-label="Role description" /><button type="submit">Rename</button></form>` : html`<p class="sub">${role.description}</p>`}
+      ${role.key === 'ADM' ? html`<p class="note">The administrator role can be changed, but it always keeps user, role and access management so the system can never be locked out. It carries no business approvals by design.</p>` : !d.edit ? html`<p class="note">You can read roles but not change them. Sign in as the System administrator to edit.</p>` : ''}
       ${areas.map((a) => html`<fieldset><legend>${a}</legend><div class="checks">${d.cat.filter((p) => p.area === a).map((p) => html`
         <label class="check ${draft.has(p.key) ? 'on' : ''}"><input type="checkbox" data-perm="${p.key}" ${draft.has(p.key) ? raw('checked') : ''} ${locked ? raw('disabled') : ''}><span>${p.label}${p.bandable ? html` <em>limit</em>` : ''}<small class="mono">${p.key}</small></span></label>`)}</div></fieldset>`)}
       ${!locked ? html`<div class="savebar"><span>${added.length || removed.length ? html`<b>${added.length}</b> to add, <b>${removed.length}</b> to remove` : 'No changes'}</span>
         <input id="role-reason" placeholder="Reason for this change" aria-label="Reason" />
         <button class="primary" data-act="role-save" ${added.length || removed.length ? '' : raw('disabled')}>Save</button>
-        ${role.is_system ? '' : html`<button data-act="role-delete">Delete role</button>`}</div>` : ''}
+        ${role.key === 'ADM' ? '' : html`<button class="danger" data-act="role-delete" ${role.holders ? raw('disabled title="Revoke this role from everyone first"') : ''}>Delete role</button>`}</div>` : ''}
     </aside>
   </section>`;
 }
@@ -162,6 +162,12 @@ export async function onSubmit(form: string): Promise<boolean> {
     case 'assign': {
       const f = { userId: S.userSel, roleKey: val('as-role'), siteId: val('as-site') || null, maxAmount: val('as-limit') || null, validUntil: val('as-until') || null };
       await act('Role assigned', (c) => admin.assignRole(c, f)); return true;
+    }
+    case 'roledesc': {
+      const k = S.roleSel, reason = val('role-reason') || 'Description updated';
+      const r = await act('Role updated', (c) => admin.updateRole(c, { roleKey: k, description: val('role-desc'), reason }));
+      if (r) await R.render();
+      return true;
     }
     case 'newrole': {
       const base = (await read((db) => admin.listRoles(db))).find((r) => r.key === S.roleSel);

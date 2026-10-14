@@ -113,7 +113,11 @@ describe('roles are data', () => {
     await rejects(w.as('admin', (c) => admin.setRolePermissions(c, { roleKey: 'ADM', permissions: [], reason: 'x' })), 'FORBIDDEN');
     await rejects(w.as('admin', (c) => admin.setRolePermissions(c, { roleKey: 'GATE', permissions: ['receipt.view'], reason: '' })), 'BAD_REQUEST');
     await rejects(w.as('admin', (c) => admin.deleteRole(c, { roleKey: 'GATE' })), 'INVALID_STATE');
-    await rejects(w.as('admin', (c) => admin.deleteRole(c, { roleKey: 'BUY' })), 'FORBIDDEN');
+    await rejects(w.as('admin', (c) => admin.deleteRole(c, { roleKey: 'BUY' })), 'INVALID_STATE');   // still held
+    await rejects(w.as('admin', (c) => admin.deleteRole(c, { roleKey: 'ADM' })), 'FORBIDDEN');
+    await rejects(w.as('admin', (c) => admin.setRolePermissions(c, { roleKey: 'ADM', permissions: ['audit.view'], reason: 'x' })), 'FORBIDDEN');
+    await w.as('admin', (c) => admin.updateRole(c, { roleKey: 'GATE', description: 'Gate clerk (night shift)', reason: 'Clearer name' }));
+    expect((await admin.listRoles(w.pool)).find((r) => r.key === 'GATE')?.description).toBe('Gate clerk (night shift)');
   });
 
   it('the permission catalogue and role list are readable', async () => {

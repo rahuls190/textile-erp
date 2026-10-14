@@ -34,8 +34,8 @@ Demo logins use the password above; the login screen has one-click person chips.
 |---|---|
 | Real login: password strength, **lockout after 5 failures (15 min)**, forced change after a reset, sign-in log, session list, change own password (ends other sessions) | ✅ |
 | Users: create, edit, suspend/reactivate, unlock, reset password (ends sessions) | ✅ |
-| Roles are data: assign per site with amount limit and expiry, revoke with reason, **edit role permissions** (reason required), custom roles | ✅ |
-| Guards: no self-access changes, never remove the last administrator, admin role has no business approval power | ✅ |
+| Roles are data: assign per site with amount limit and expiry, revoke with reason, **edit role permissions and descriptions** (reason required), add custom roles, delete unused roles | ✅ |
+| Guards: no self-access changes, never remove the last administrator; the admin role keeps user, role and access management and cannot be deleted | ✅ |
 | HR: employee register (site-scoped, bank masked), departments, designations, shifts, holidays | ✅ |
 | Attendance (P/A/H/L/LWP/WO/HOL, late/overtime from the shift), locked once payroll is approved | ✅ |
 | Leave: yearly quota ledger (append-only), apply → line manager or HR approves (never yourself) | ✅ |
