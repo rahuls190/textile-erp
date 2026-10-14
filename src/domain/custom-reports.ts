@@ -26,7 +26,7 @@ type Kind = 'text' | 'date' | 'num' | 'money';
 interface Field { key: string; label: string; kind: Kind; sql: string; words: string[]; measure?: boolean }
 interface Dataset {
   key: string; label: string; permission: string; sensitive?: boolean; words: string[];
-  from: string; siteCol: string; where?: string; dateField: string; fields: Field[];
+  from: string; siteCol?: string; where?: string; dateField: string; fields: Field[];
 }
 
 const T = (key: string, label: string, sql: string, words: string[] = [], kind: Kind = 'text'): Field => ({ key, label, sql, words: [label.toLowerCase(), ...words], kind });
@@ -45,6 +45,20 @@ export const DATASETS: Dataset[] = [
       T('date', 'Date', 'po.created_at::date', ['day'], 'date'), T('month', 'Month', MONTH('po.created_at')),
       M('qty', 'Ordered qty', 'l.qty', ['ordered', 'quantity', 'metres', 'meters']), M('received', 'Received qty', 'l.received_qty', ['received', 'delivered']),
       M('accepted', 'Accepted qty', 'l.accepted_qty', ['accepted']), M('rejected', 'Rejected qty', 'l.rejected_qty', ['rejected', 'rejection']), M('amount', 'Line value', 'l.qty * l.rate', ['value', 'amount', 'spend'], 'money')] },
+  { key: 'sales_orders', label: 'Sales orders', permission: 'so.view', words: ['sales order', 'sale order', 'sales', 'sale', 'sold', 'selling', 'revenue', 'customer', 'customers', 'booked'],
+    from: 'sales_order o JOIN partner c ON c.id = o.customer_id JOIN site s ON s.id = o.site_id', siteCol: 'o.site_id', dateField: 'date',
+    where: "o.status IN ('confirmed','part_dispatched','dispatched')",
+    fields: [T('number', 'SO number', 'o.number'), T('customer', 'Customer', 'c.name', ['buyer', 'party', 'client']), T('site', 'Site', 's.code'), T('status', 'Status', 'o.status'),
+      T('date', 'Date', 'o.created_at::date', ['day'], 'date'), T('month', 'Month', MONTH('o.created_at')), T('due', 'Due date', 'o.due_date', ['due', 'delivery'], 'date'), M('total', 'Sales value', 'o.total', ['value', 'amount', 'sales', 'sale', 'revenue', 'turnover', 'total'], 'money')] },
+  { key: 'sales_lines', label: 'Items sold', permission: 'so.view', words: ['item sold', 'items sold', 'sold item', 'item wise sales', 'what we sold', 'sales by item', 'product sales', 'quantity sold'],
+    from: 'so_line l JOIN sales_order o ON o.id = l.so_id JOIN partner c ON c.id = o.customer_id JOIN item i ON i.id = l.item_id', siteCol: 'o.site_id', dateField: 'date',
+    where: "o.status IN ('confirmed','part_dispatched','dispatched')",
+    fields: [T('item', 'Item', "i.code || ' · ' || i.name", ['fabric', 'product', 'material']), T('customer', 'Customer', 'c.name', ['buyer', 'party']), T('status', 'Order status', 'o.status', ['status']), T('date', 'Date', 'o.created_at::date', ['day'], 'date'), T('month', 'Month', MONTH('o.created_at')),
+      M('qty', 'Ordered qty', 'l.qty', ['ordered', 'quantity', 'metres', 'sold']), M('dispatched', 'Dispatched qty', 'l.dispatched_qty', ['dispatched', 'shipped', 'sent']), M('to_send', 'Qty still to send', 'l.qty - l.dispatched_qty', ['pending', 'to send', 'undelivered']), M('amount', 'Value', 'l.amount', ['value', 'amount', 'revenue', 'sales'], 'money')] },
+  { key: 'leads', label: 'CRM leads', permission: 'crm.view', words: ['lead', 'leads', 'crm', 'prospect', 'prospects', 'enquiry', 'enquiries', 'pipeline'],
+    from: 'crm_lead l JOIN app_user u ON u.id = l.owner_id', dateField: 'date',
+    fields: [T('name', 'Contact', 'l.name', ['person']), T('company', 'Company', "COALESCE(l.company,'(none)')", ['firm']), T('status', 'Stage', 'l.status', ['stage', 'status']), T('source', 'Source', "COALESCE(l.source,'(unknown)')", ['channel', 'origin']), T('owner', 'Owner', 'u.username', ['salesperson', 'executive']),
+      T('date', 'Created', 'l.created_at::date', ['day'], 'date'), T('month', 'Month', MONTH('l.created_at')), M('est_value', 'Estimated value', 'l.est_value', ['value', 'worth', 'potential'], 'money')] },
   { key: 'stock_lots', label: 'Stock lots', permission: 'inventory.view', words: ['stock', 'inventory', 'lots', 'rolls', 'warehouse'],
     from: `lot l JOIN item i ON i.id = l.item_id JOIN site s ON s.id = l.site_id LEFT JOIN (SELECT lot_id, sum(qty) FILTER (WHERE status='HOLD') AS held, sum(qty) FILTER (WHERE status='ACCEPTED') AS accepted,
            sum(qty) FILTER (WHERE status='REJECTED') AS rejected FROM stock_ledger GROUP BY lot_id) b ON b.lot_id = l.id`, siteCol: 'l.site_id', dateField: 'date',
@@ -151,7 +165,7 @@ export function compile(spec: Spec, sites: string[] | null) {
   const d = dataset(spec.dataset)!;
   const f = new Map(d.fields.map((x) => [x.key, x]));
   const params: unknown[] = [sites];
-  const where = [`($1::uuid[] IS NULL OR ${d.siteCol} = ANY($1::uuid[]))`];
+  const where = [d.siteCol ? `($1::uuid[] IS NULL OR ${d.siteCol} = ANY($1::uuid[]))` : '($1::uuid[] IS NULL OR true)'];       // company-level data (leads) has no site column
   if (d.where) where.push(d.where);
   for (const x of spec.filters) {
     const fd = f.get(x.field)!;

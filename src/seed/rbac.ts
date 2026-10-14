@@ -21,7 +21,7 @@ export const ROLES: Record<string, { description: string; perms: string[] }> = {
                  'rate.approve', 'item.view'] },
   STO: { description: 'Storekeeper',
          perms: ['receipt.post', 'receipt.view', 'putaway.execute', 'reservation.allocate', 'inventory.view',
-                 'item.view', 'po.view', 'qc.view'] },
+                 'item.view', 'po.view', 'qc.view', 'dispatch.post', 'so.view'] },
   INV: { description: 'Inventory controller',
          perms: ['receipt.exception.approve', 'adjustment.propose', 'adjustment.approve~', 'adjustment.post',
                  'reservation.allocate', 'reservation.override.approve', 'location.configure', 'inventory.view',
@@ -33,9 +33,9 @@ export const ROLES: Record<string, { description: string; perms: string[] }> = {
   PPC: { description: 'Production planner',
          perms: ['reservation.allocate', 'inventory.view', 'item.view', 'po.view'] },
   FC: { description: 'Finance controller',
-        perms: ['hr.salary.approve', 'hr.salary.view', 'hr.payroll.approve', 'hr.payroll.view', 'hr.employee.view', 'hr.bank.view', 'escalation.raise', 'escalation.senior', 'escalation.view', 'org.approve', 'partner.bank.approve', 'partner.bank.view', 'partner.view', 'po.view', 'inventory.view', 'audit.view'] },
+        perms: ['hr.salary.approve', 'hr.salary.view', 'hr.payroll.approve', 'hr.payroll.view', 'hr.employee.view', 'hr.bank.view', 'escalation.raise', 'escalation.senior', 'escalation.view', 'org.approve', 'partner.bank.approve', 'partner.bank.view', 'partner.view', 'po.view', 'inventory.view', 'audit.view', 'so.view', 'sales.view', 'crm.view'] },
   AUD: { description: 'Auditor (read-only)',
-         perms: ['audit.view', 'user.view', 'hr.employee.view', 'hr.attendance.view', 'hr.leave.view', 'inventory.view', 'po.view', 'item.view', 'partner.view', 'receipt.view', 'qc.view'] },
+         perms: ['audit.view', 'user.view', 'hr.employee.view', 'hr.attendance.view', 'hr.leave.view', 'inventory.view', 'po.view', 'item.view', 'partner.view', 'receipt.view', 'qc.view', 'so.view', 'crm.view', 'sales.view'] },
   HRM: { description: 'HR manager',
          perms: ['hr.org.manage', 'hr.employee.view', 'hr.employee.create', 'hr.employee.edit', 'hr.employee.exit', 'hr.bank.view',
                  'hr.attendance.view', 'hr.attendance.mark', 'hr.attendance.correct', 'hr.shift.manage',
@@ -46,7 +46,11 @@ export const ROLES: Record<string, { description: string; perms: string[] }> = {
   OWN: { description: 'Business owner (sees everything, can override approvals)',
          perms: ['owner.view', 'owner.override', 'escalation.raise', 'escalation.senior', 'escalation.view', 'audit.view', 'user.view',
                  'inventory.view', 'po.view', 'item.view', 'partner.view', 'receipt.view', 'qc.view',
-                 'hr.employee.view', 'hr.attendance.view', 'hr.leave.view', 'hr.payroll.view', 'hr.salary.view'] },
+                 'hr.employee.view', 'hr.attendance.view', 'hr.leave.view', 'hr.payroll.view', 'hr.salary.view', 'crm.view', 'sales.view', 'so.view'] },
+  SAL: { description: 'Sales executive',
+         perms: ['crm.view', 'crm.manage', 'sales.view', 'partner.create', 'partner.submit', 'partner.view', 'quote.create', 'quote.send', 'so.create', 'so.submit', 'so.view', 'item.view', 'inventory.view'] },
+  SLM: { description: 'Sales manager',
+         perms: ['crm.view', 'crm.manage', 'sales.view', 'partner.view', 'quote.create', 'quote.send', 'quote.discount.over', 'so.create', 'so.submit', 'so.view', 'so.approve~', 'so.cancel', 'customer.terms', 'item.view', 'inventory.view', 'reservation.allocate'] },
   SUP: { description: 'Line supervisor (own team)',
          perms: ['hr.employee.view', 'hr.attendance.view', 'hr.attendance.mark', 'hr.leave.view', 'hr.leave.approve'] },
 };
@@ -61,7 +65,7 @@ for (const [k, def] of Object.entries(ROLES)) {
 export const AREAS: Record<string, string> = {
   user: 'Users', access: 'Access', role: 'Roles', site: 'Sites', audit: 'Audit', org: 'Organisation', unit: 'Units', item: 'Items',
   partner: 'Partners', rate: 'Rates', po: 'Purchase orders', receipt: 'Receiving', qc: 'Quality', putaway: 'Putaway',
-  owner: 'Owner', escalation: 'Escalations', reservation: 'Reservations', adjustment: 'Adjustments', location: 'Locations', inventory: 'Inventory', hr: 'HR & payroll',
+  owner: 'Owner', crm: 'CRM', sales: 'Sales', quote: 'Quotations', so: 'Sales orders', customer: 'Customers', dispatch: 'Dispatch', escalation: 'Escalations', reservation: 'Reservations', adjustment: 'Adjustments', location: 'Locations', inventory: 'Inventory', hr: 'HR & payroll',
 };
 
 /** Every known permission, derived from the role catalogue (plus anything the console adds later). */

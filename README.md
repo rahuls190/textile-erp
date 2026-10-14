@@ -15,7 +15,7 @@ npm install
 npm run migrate                 # create the schema
 npm run seed:demo               # demo company, site, roles, users (password: Demo-Passw0rd!  — dev only)
 npm start                       # API on http://localhost:3000
-npm test                        # 116 tests, each file on a fresh database
+npm test                        # 127 tests, each file on a fresh database
 ```
 
 Try it: `POST /api/login` → use the token as `Authorization: Bearer …`. **Every write needs an `Idempotency-Key`
@@ -76,6 +76,7 @@ The escalation time limits (24 h for orders, adjustments and leave; 72 h salary;
 | W03 ledger-derived balances, putaway rules (held stock can't enter an allocation pool) | ✅ |
 | W04 reservations with atomic availability (concurrent requests cannot over-commit) | ✅ (reservations only) |
 | W06 adjustments: propose → independent approve (band) → post; never type over a balance | ◐ (no count workflow) |
+| **CRM + sales**: leads → follow-ups → quotation (max 10% discount without extra right, 15-day validity) → order (banded approval, creator ≠ approver, credit-limit check) → stock hold → dispatch by storekeeper (immutable dispatch note, consumes the hold, posts the stock ledger) | ✅ (no invoice or payment yet) |
 | REST API + validation, clean errors, reads filtered by site scope | ✅ |
 
 The blueprint's own worked example (p.55: 500 m → 480 accepted / 20 rejected → reserve 120 → 360 left) and the
@@ -86,7 +87,7 @@ are automated in `test/`.
 
 Gate-in/out scanning, scanning for issue to production (needs F01–F08), cycle counts by scan, inter-site transfers (W05) ·
 P01 planning · P03 vendor portal · W05 transfers · W07 split/slit · W08 supplier return/debit · W09 dead stock ·
-J01–J03 subcontracting · F01–F08 production · S01–S03 sales · A01–A04 finance/GST/e-invoice/e-way bill ·
+J01–J03 subcontracting · F01–F08 production · S-series invoicing, returns and receipts · sales orders are not yet in the owner-desk escalation or override · A01–A04 finance/GST/e-invoice/e-way bill ·
 recruitment/appraisal/loans, maintenance, scheduled or emailed reports, PDF/Excel export (CSV only), finance reports (need A01–A04) · **offline factory node + cloud sync** (the outbox and idempotency are the
 foundation for it) · data migration tooling. (The browser demo is a prototype interface; a production front end is not built.)
 

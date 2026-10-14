@@ -10,6 +10,7 @@ import * as reports from './domain/reports.js';
 import * as custom from './domain/custom-reports.js';
 import * as ai from './domain/ai.js';
 import * as barcode from './domain/barcode.js';
+import * as sales from './domain/sales.js';
 import * as prefs from './domain/prefs.js';
 import * as admin from './domain/admin.js';
 import * as masters from './domain/masters.js';
@@ -88,6 +89,33 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
   app.get('/api/me/preferences', read((db, a) => prefs.getPreferences(db, a.id)));
   cmd('/api/me/preferences', 'user.preferences', z.object({ theme: z.string().optional(), accent: z.string().optional(), layout: z.string().optional(), density: z.string().optional(), reset: z.boolean().optional() }),
     (c, b) => prefs.setPreferences(c, b.reset ? { reset: true } : (b as never)));
+  // ── CRM and sales ──
+  const slines = z.array(z.object({ itemId: id, qty: z.string(), rate: z.string(), discPct: z.string().optional() })).min(1);
+  app.get('/api/crm/leads', read(async (db, a) => { const r = await sales.listLeads(db, a.id); if (!r) throw forbidden('Not permitted: crm.view'); return r; }));
+  app.get('/api/crm/leads/:id', read((db, a, r) => sales.getLead(db, a.id, (r.params as { id: string }).id)));
+  cmd('/api/crm/leads', 'crm.lead.create', z.object({ name: z.string(), company: z.string().optional(), phone: z.string().optional(), email: z.string().optional(), source: z.string().optional(), interest: z.string().optional(), estValue: z.string().optional(), nextFollowUp: z.string().optional() }), (c, b) => sales.createLead(c, b), true);
+  cmd('/api/crm/leads/:id/status', 'crm.lead.status', z.object({ status: z.string(), reason: z.string().optional(), expectedVersion: ver }), (c, b, p) => sales.setLeadStatus(c, { leadId: p.id, ...b }));
+  cmd('/api/crm/activities', 'crm.activity', z.object({ leadId: id.optional(), customerId: id.optional(), kind: z.string(), summary: z.string(), dueDate: z.string().optional() }), (c, b) => sales.addActivity(c, b), true);
+  cmd('/api/crm/activities/:id/done', 'crm.activity.done', z.object({ outcome: z.string().optional() }), (c, b, p) => sales.completeActivity(c, { activityId: p.id, outcome: b.outcome }));
+  app.get('/api/customers', read((db, a) => sales.listCustomers(db, a.id)));
+  cmd('/api/customers/:id/terms', 'customer.terms', z.object({ creditLimit: z.string(), paymentDays: z.number().int().optional() }), (c, b, p) => sales.setCreditTerms(c, { partnerId: p.id, ...b }));
+  app.get('/api/quotes', read((db, a) => sales.listQuotes(db, a.id)));
+  app.get('/api/quotes/:id', read((db, a, r) => sales.getQuote(db, a.id, (r.params as { id: string }).id)));
+  cmd('/api/quotes', 'quote.create', z.object({ siteId: id, customerId: id, leadId: id.optional(), validUntil: z.string().optional(), lines: slines, notes: z.string().optional() }), (c, b) => sales.createQuote(c, b), true);
+  cmd('/api/quotes/:id/send', 'quote.send', ev, (c, b, p) => sales.sendQuote(c, { quoteId: p.id, ...b }));
+  cmd('/api/quotes/:id/decide', 'quote.decide', z.object({ expectedVersion: ver, accepted: z.boolean(), reason: z.string().optional() }), (c, b, p) => sales.decideQuote(c, { quoteId: p.id, ...b }));
+  cmd('/api/quotes/:id/cancel', 'quote.cancel', z.object({ expectedVersion: ver, reason: z.string() }), (c, b, p) => sales.cancelQuote(c, { quoteId: p.id, ...b }));
+  app.get('/api/sales/orders', read((db, a) => sales.listOrders(db, a.id)));
+  app.get('/api/sales/orders/:id', read((db, a, r) => sales.getOrder(db, a.id, (r.params as { id: string }).id)));
+  app.get('/api/sales/lines/:id/stock', read((db, a, r) => sales.stockForLine(db, a.id, (r.params as { id: string }).id)));
+  app.get('/api/sales/summary', read((db, a) => sales.salesSummary(db, a.id)));
+  cmd('/api/sales/orders', 'so.create', z.object({ siteId: id, customerId: id.optional(), quoteId: id.optional(), dueDate: z.string().optional(), lines: slines.optional() }), (c, b) => sales.createOrder(c, b), true);
+  cmd('/api/sales/orders/:id/submit', 'so.submit', ev, (c, b, p) => sales.submitOrder(c, { orderId: p.id, ...b }));
+  cmd('/api/sales/orders/:id/approve', 'so.approve', ev, (c, b, p) => sales.approveOrder(c, { orderId: p.id, ...b }));
+  cmd('/api/sales/orders/:id/return', 'so.return', z.object({ expectedVersion: ver, reason: z.string() }), (c, b, p) => sales.returnOrder(c, { orderId: p.id, ...b }));
+  cmd('/api/sales/orders/:id/cancel', 'so.cancel', z.object({ expectedVersion: ver, reason: z.string() }), (c, b, p) => sales.cancelOrder(c, { orderId: p.id, ...b }));
+  cmd('/api/sales/orders/:id/allocate', 'so.allocate', z.object({ lineId: id, lotId: id, qty: z.string() }), (c, b, p) => sales.allocate(c, { orderId: p.id, ...b }));
+  cmd('/api/sales/orders/:id/dispatch', 'so.dispatch', z.object({ vehicleNo: z.string().optional(), lrNo: z.string().optional(), lines: z.array(z.object({ lineId: id, lotId: id, locationId: id, qty: z.string() })).min(1) }), (c, b, p) => sales.dispatch(c, { orderId: p.id, ...b }), true);
   // ── barcodes: read a scanned code, list labels to print, move a roll forward ──
   app.get('/api/scan', read((db, a, req) => barcode.resolveScan(db, a.id, String((req.query as { code?: string }).code ?? ''))));
   app.get('/api/labels', read((db, a) => barcode.labelData(db, a.id)));

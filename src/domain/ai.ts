@@ -75,7 +75,8 @@ function fixTypos(text: string, allowed: typeof DATASETS): string {
 const NUMWORD: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, eleven: 11, twelve: 12 };
 /** Things people ask about that this system does not hold yet. Better to say so than to guess. */
 const NOT_BUILT: [RegExp, string][] = [
-  [/ (sale|sales|sold|selling|customer|customers|invoice|invoices|revenue|dispatch) /, 'Sales and customer data are not in the system yet (the sales module is not built).'],
+  [/ (invoice|invoices|receivable|receivables|outstanding payments?) /, 'Invoicing and payments are not in the system yet (the finance module is not built).'],
+  [/ (sale|sales|sold|selling|customer|customers|revenue|crm|leads?) /, 'You do not have a role that can see sales or CRM data.'],
   [/ (production|stitching|cutting|wip|garments?) /, 'Production data is not in the system yet.'],
   [/ (profit|expense|expenses|ledger|gst|tax invoice|accounts?) /, 'Finance and accounting data are not in the system yet.'],
 ];

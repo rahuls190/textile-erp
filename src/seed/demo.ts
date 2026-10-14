@@ -8,6 +8,7 @@ import * as admin from '../domain/admin.js';
 import * as masters from '../domain/masters.js';
 import { seedHrBase, seedHrRecent } from './hr-demo.js';
 import { seedOwnerBase, seedOwnerFloor } from './owner-demo.js';
+import { seedSalesBase, seedSalesFloor } from './sales-demo.js';
 
 export interface World {
   pool: Pool;
@@ -31,7 +32,7 @@ export async function bootstrapAdmin(pool: Pool, username: string, password: str
   return { id: u.id, username };
 }
 
-export async function buildWorld(pool: Pool, password = 'Demo-Passw0rd!', opts: { recent?: boolean; owner?: boolean } = {}): Promise<World> {
+export async function buildWorld(pool: Pool, password = 'Demo-Passw0rd!', opts: { recent?: boolean; owner?: boolean; sales?: boolean } = {}): Promise<World> {
   await migrate(pool);
   await seedRbac(pool);
   const actors: Record<string, Actor> = {};
@@ -99,6 +100,8 @@ export async function buildWorld(pool: Pool, password = 'Demo-Passw0rd!', opts: 
   await seedHrBase(world, password);
   await seedOwnerBase(world);
   if (opts.recent !== false) await seedHrRecent(world);
+  if (opts.sales) await seedSalesBase(world);
   if (opts.owner) await seedOwnerFloor(world);
+  if (opts.owner && opts.sales) await seedSalesFloor(world);
   return world;
 }
