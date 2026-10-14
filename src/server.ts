@@ -246,6 +246,7 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
 
   // ── purchase orders ──
   const poLine = z.object({ itemId: id, qty: pos, rate: pos.optional(), dueDate: date.nullish() });
+  app.post('/api/po/quote', read((db, a, r) => { const b = z.object({ partnerId: id, lines: z.array(z.object({ itemId: id, qty: z.string() })).max(50) }).parse(r.body ?? {}); return po.quoteLines(db, a.id, b); }));
   cmd('/api/po', 'po.create', z.object({ siteId: id, partnerId: id, lines: z.array(poLine).min(1), terms: z.record(z.string(), z.unknown()).optional() }), (c, b) => po.createPO(c, b), true);
   cmd('/api/po/:id/edit', 'po.edit', z.object({ expectedVersion: ver, lines: z.array(poLine).min(1), terms: z.record(z.string(), z.unknown()).optional() }), (c, b, p) => po.updateDraftPO(c, { poId: p.id, ...b }));
   cmd('/api/po/:id/submit', 'po.submit', ev, (c, b, p) => po.submitPO(c, { poId: p.id, expectedVersion: b.expectedVersion }));

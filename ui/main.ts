@@ -20,6 +20,7 @@ import * as O from './views-owner.js';
 import * as P from './views-reports.js';
 import * as O2 from './views-overview.js';
 import * as B from './views-barcode.js';
+import * as PF from './po-form.js';
 import * as SL from './views-sales.js';
 import * as MX from './views-masters.js';
 import * as AI from './views-ai.js';
@@ -82,7 +83,7 @@ async function poView(): Promise<Raw> {
     const sel = S.poId ? await po.getPO(db, uid(), S.poId).catch(() => null) : null;
     const rcpt = sel ? (await db.query(`SELECT r.number, r.challan_no, r.received_at FROM receipt r WHERE r.po_id=$1 ORDER BY r.received_at`, [sel.id])).rows : [];
     const names = Object.fromEntries((await db.query('SELECT id, username FROM app_user')).rows.map((r) => [r.id, r.username]));
-    const items = (await db.query(`SELECT id, code, name FROM item WHERE status='active' ORDER BY code`)).rows;
+    const items = (await db.query(`SELECT id, code, name, stock_unit FROM item WHERE status='active' ORDER BY code`)).rows;
     const vendors = (await db.query(`SELECT id, code, name FROM partner WHERE status='active' AND is_vendor ORDER BY code`)).rows;
     const itemCodes = Object.fromEntries((await db.query('SELECT id, code FROM item')).rows.map((r) => [r.id, r.code]));
     return { list, sel, rcpt, names, items, vendors, itemCodes };
@@ -95,7 +96,7 @@ async function poView(): Promise<Raw> {
     const pa = s.pending_amendment as null | { reason: string; newTotal: string };
     if (pa) return html`<div class="pending"><b>Amendment awaiting approval</b><span>${pa.reason} · new total ${money(pa.newTotal)} · proposed by ${d.names[s.amended_by] ?? ''}</span></div><div class="row">${b('po-approve', 'Approve amendment', 'primary')}${b('po-return', 'Discard amendment')}</div>${reason}`;
     switch (s.status) {
-      case 'draft': return html`<div class="row">${b('po-submit', 'Submit for approval', 'primary')}${b('po-cancel', 'Cancel order')}</div>${reason}`;
+      case 'draft': return html`<div class="row">${b('po-submit', 'Submit for approval', 'primary')}${s.created_by === uid() ? b('po-editlines', 'Edit items') : ''}${b('po-cancel', 'Cancel order')}</div>${reason}`;
       case 'approval_pending': return html`<div class="row">${b('po-approve', 'Approve', 'primary')}${b('po-return', 'Return to buyer')}${b('po-cancel', 'Cancel order')}</div>${reason}`;
       case 'approved': return html`<div class="row">${b('po-release', 'Release to vendor', 'primary')}${b('po-cancel', 'Cancel order')}</div>${reason}`;
       case 'released': case 'acknowledged': case 'partial_receipt':
@@ -103,16 +104,7 @@ async function poView(): Promise<Raw> {
       default: return html`<p class="note">This order is ${s.status}. No further actions.</p>`;
     }
   };
-  const form = S.open.has('newpo') ? html`
-    <form class="card form" data-form="newpo">
-      <h2>New purchase order</h2>
-      <label>Vendor<select id="f-vendor">${d.vendors.map((v) => html`<option value="${v.id}">${v.code} · ${v.name}</option>`)}</select></label>
-      <label>Item<select id="f-item">${d.items.map((i) => html`<option value="${i.id}">${i.code} · ${i.name}</option>`)}</select></label>
-      <label>Quantity (m)<input id="f-qty" inputmode="decimal" value="500" /></label>
-      <label>Due date<input id="f-due" type="date" value="2026-11-30" /></label>
-      <p class="note">The price comes from the vendor's approved rate and is copied onto the order, so later rate changes never rewrite it.</p>
-      <div class="row"><button class="primary" type="submit">Create draft</button><button type="button" data-act="toggle-newpo">Close</button></div>
-    </form>` : html``;
+  const form = PF.formView(d.items, d.vendors);
   return html`
   ${head('Purchase orders', 'Creating, approving and releasing are three separate rights. Nobody approves their own order.', html`<button class="primary" data-act="toggle-newpo">New purchase order</button>`)}
   ${form}
@@ -125,8 +117,8 @@ async function poView(): Promise<Raw> {
       <div class="dh"><h2 class="mono">${s.number}</h2>${chip(s.status)}</div>
       ${kv('Total', money(s.total))}${kv('Version', `v${s.version} · revision ${s.revision}`)}${kv('Created by', d.names[s.created_by] ?? '')}${kv('Approved by', d.names[s.approved_by] ?? '–')}${kv('Released by', d.names[s.released_by] ?? '–')}
       <h3>Lines</h3>
-      <div class="tablewrap"><table class="mini"><thead><tr><th>Item</th><th class="r">Ordered</th><th class="r">Received</th><th class="r">Accepted</th><th class="r">Rejected</th><th class="r">Rate</th></tr></thead>
-      <tbody>${s.lines.map((l: Record<string, string>) => html`<tr><td class="mono">${d.itemCodes[l.item_id]}</td><td class="r num">${qty(l.qty)}</td><td class="r num">${qty(l.received_qty)}</td><td class="r num">${qty(l.accepted_qty)}</td><td class="r num">${qty(l.rejected_qty)}</td><td class="r num">${money(l.rate)}</td></tr>`)}</tbody></table></div>
+      <div class="tablewrap"><table class="mini"><thead><tr><th>Item</th><th class="r">Ordered</th><th class="r">Received</th><th class="r">Accepted</th><th class="r">Rejected</th><th class="r">Rate</th><th>Due</th></tr></thead>
+      <tbody>${s.lines.map((l: Record<string, string>) => html`<tr><td class="mono">${d.itemCodes[l.item_id]}</td><td class="r num">${qty(l.qty)}</td><td class="r num">${qty(l.received_qty)}</td><td class="r num">${qty(l.accepted_qty)}</td><td class="r num">${qty(l.rejected_qty)}</td><td class="r num">${money(l.rate)}</td><td>${l.due_date ? dateOnly(String(l.due_date).slice(0, 10)) : '–'}</td></tr>`)}</tbody></table></div>
       ${d.rcpt.length ? html`<h3>Receipts</h3><ul class="plain">${d.rcpt.map((r) => html`<li><span class="mono">${r.number}</span> · challan ${r.challan_no} · ${when(r.received_at)}</li>`)}</ul>` : ''}
       <h3>History</h3><ul class="plain">${s.versions.map((v: { version: number; reason: string; at: string }) => html`<li><span class="mono">v${v.version}</span> ${v.reason ?? ''} <small>${when(v.at)}</small></li>`)}</ul>
       <h3>Actions</h3>${actions()}` : html`<p class="empty">Select an order to see its lines, history and the actions available.</p>`}
@@ -400,6 +392,7 @@ document.addEventListener('click', async (ev) => {
   if (await SL.onClick(t)) return;
   if (await MX.onClick(t)) return;
   if (await AI.onClick(t)) return;
+  if (await PF.onClick(t, async () => (await read((db) => db.query(`SELECT id, code, name, stock_unit FROM item WHERE status='active' ORDER BY code`))).rows as never)) return;
   const pp = t.closest('[data-pick-po]') as HTMLElement | null; if (pp) { S.poId = pp.dataset.pickPo!; return render(); }
   const pq = t.closest('[data-pick-qc]') as HTMLElement | null; if (pq) { S.inspId = pq.dataset.pickQc!; return render(); }
   const pl = t.closest('[data-pick-lot]') as HTMLElement | null; if (pl) { S.lotId = S.lotId === pl.dataset.pickLot ? '' : pl.dataset.pickLot!; return render(); }
@@ -407,7 +400,7 @@ document.addEventListener('click', async (ev) => {
   const a = b.dataset.act!, id = b.dataset.id ?? '', v = Number(b.dataset.v ?? 0);
   switch (a) {
     case 'signout': return signOut();
-    case 'toggle-newpo': S.open.has('newpo') ? S.open.delete('newpo') : S.open.add('newpo'); return render();
+    case 'toggle-newpo': { const its = (await read((db) => db.query(`SELECT id, code, name, stock_unit FROM item WHERE status='active' ORDER BY code`))).rows; const vs = (await read((db) => db.query(`SELECT id, code, name FROM partner WHERE status='active' AND is_vendor ORDER BY code`))).rows; if (PF.F.open) PF.F.open = false; else await PF.openNew(its, vs); await render(); if (PF.F.open) PF.requoteNow(); return; }
     case 'po-submit': return void act('Submitted for approval', async (c) => po.submitPO(c, { poId: S.poId, expectedVersion: await poVer(c) }));
     case 'po-approve': return void act('Approved', async (c) => po.approvePO(c, { poId: S.poId, expectedVersion: await poVer(c) }));
     case 'po-release': return void act('Released to vendor', async (c) => po.releasePO(c, { poId: S.poId, expectedVersion: await poVer(c) }));
@@ -451,10 +444,7 @@ document.addEventListener('submit', async (ev) => {
   if (await MX.onSubmit(f.dataset.form!, f, ev as SubmitEvent)) return;
   if (await AI.onSubmit(f.dataset.form!, f)) return;
   switch (f.dataset.form) {
-    case 'newpo': {
-      const partnerId = val('f-vendor'), itemId = val('f-item');
-      return void act('Draft purchase order created', async (c) => { const p = await po.createPO(c, { siteId: K.world.siteId, partnerId, lines: [{ itemId, qty: val('f-qty'), dueDate: val('f-due') || null }] }); S.poId = p.id; S.open.delete('newpo'); return p; });
-    }
+    case 'newpo': return void (await PF.onSubmit());
     case 'receive': {
       const [poLineId, itemId] = val('r-line').split('|'); const poId = val('r-po');
       return void act('Receipt posted. The roll is on QC hold', (c) => rcv.postReceipt(c, { siteId: K.world.siteId, partnerId: K.world.vendorId, poId, challanNo: val('r-challan'), lines: [{ poLineId, itemId, qty: val('r-qty') }] }));

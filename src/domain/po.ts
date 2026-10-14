@@ -34,10 +34,12 @@ async function bump(ctx: Ctx, poId: string, set: string, params: unknown[] = [])
 }
 
 async function buildLines(ctx: Ctx, partnerId: string, lines: PoLineInput[]) {
-  if (!lines.length) throw badRequest('A purchase order needs at least one line');
+  if (!lines.length) throw badRequest('A purchase order needs at least one item');
+  if (lines.length > 50) throw badRequest('A purchase order can hold up to 50 items; split it into two orders');
   const out: { itemId: string; qty: string; unit: string; rate: string; dueDate: string | null; amount: string }[] = [];
-  for (const l of lines) {
-    if (!qGt(l.qty, '0')) throw badRequest('Line quantity must be positive');
+  for (const [n, l] of lines.entries()) {
+    if (!/^\d+(\.\d{1,4})?$/.test(String(l.qty ?? '').trim()) || !qGt(String(l.qty).trim(), '0')) throw badRequest(`Item ${n + 1}: quantity must be a positive number`);
+    if (l.dueDate && !(/^\d{4}-\d{2}-\d{2}$/.test(l.dueDate) && !Number.isNaN(Date.parse(l.dueDate)))) throw badRequest(`Item ${n + 1}: due date is not a valid date`);
     const it = (await ctx.db.query('SELECT id, code, status, stock_unit FROM item WHERE id=$1', [l.itemId])).rows[0];
     if (!it) throw notFound('Item');
     if (it.status !== 'active') throw invalidState(`Item ${it.code} is ${it.status}; only released items can be purchased`);
@@ -71,6 +73,25 @@ export async function createPO(ctx: Ctx, i: { siteId: string; partnerId: string;
   await snapshot(ctx, po.id, 'created');
   await audit(ctx, { action: 'po.create', entityType: 'purchase_order', entityId: po.id, after: { number, total: po.total } });
   return po;
+}
+
+/** Items this vendor has an approved price for today (the only ones that can be ordered without typing a rate). */
+export async function pricedItems(db: Db, userId: string, partnerId: string): Promise<string[]> {
+  await assertCan(db, userId, 'po.create', { anySite: true });
+  return (await db.query(`SELECT DISTINCT item_id FROM rate WHERE partner_id=$1 AND status IN ('approved','superseded') AND effective_from <= CURRENT_DATE AND (effective_to IS NULL OR effective_to >= CURRENT_DATE)`, [partnerId])).rows.map((r) => r.item_id as string);
+}
+
+/** What each line would cost at today's approved rates, so the form can show prices before the order is saved. */
+export async function quoteLines(db: Db, userId: string, i: { partnerId: string; lines: { itemId: string; qty: string }[] }) {
+  await assertCan(db, userId, 'po.create', { anySite: true });
+  const out: { rate: string | null; unit: string | null; amount: string | null }[] = [];
+  for (const l of i.lines) {
+    const it = (await db.query('SELECT stock_unit FROM item WHERE id=$1', [l.itemId])).rows[0];
+    const ok = /^\d+(\.\d{1,4})?$/.test(String(l.qty ?? '').trim()) && qGt(String(l.qty).trim(), '0');
+    const r = ok ? await currentRate(db, i.partnerId, l.itemId, String(l.qty).trim()) : null;
+    out.push({ rate: r ? String(r.rate) : null, unit: it?.stock_unit ?? null, amount: r && ok ? lineAmount(String(l.qty).trim(), String(r.rate)) : null });
+  }
+  return out;
 }
 
 export async function updateDraftPO(ctx: Ctx, i: { poId: string; expectedVersion: number; lines: PoLineInput[]; terms?: object }) {
