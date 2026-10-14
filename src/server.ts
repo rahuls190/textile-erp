@@ -2,7 +2,7 @@ import Fastify, { type FastifyInstance, type FastifyRequest } from 'fastify';
 import { z, ZodError } from 'zod';
 import { createPool, type Pool } from './db/pool.js';
 import { migrate } from './migrate.js';
-import { actorFromToken, login } from './core/auth.js';
+import { actorFromToken, login, logout, changeOwnPassword } from './core/auth.js';
 import { runCommand, type Actor, type Ctx } from './core/command.js';
 import { AppError, badRequest, unauthorized } from './core/errors.js';
 import * as admin from './domain/admin.js';
@@ -12,6 +12,7 @@ import * as rcv from './domain/receipt.js';
 import * as qc from './domain/qc.js';
 import * as inv from './domain/inventory.js';
 import * as q from './domain/queries.js';
+import * as hr from './domain/hr.js';
 
 declare module 'fastify' { interface FastifyRequest { actor: Actor } }
 
@@ -38,7 +39,7 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
   app.post('/api/login', async (req) => {
     const b = z.object({ username: z.string().min(1), password: z.string().min(1) }).parse(req.body);
     const s = await login(pool, b.username, b.password);
-    return { token: s.token, user: s.actor.username };
+    return { token: s.token, user: s.actor.username, mustChangePassword: s.mustChangePassword };
   });
 
   // Everything below /api requires a valid session (login excluded)
@@ -47,6 +48,14 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
     const m = /^Bearer (.+)$/.exec(req.headers.authorization ?? '');
     if (!m) throw unauthorized();
     req.actor = await actorFromToken(pool, m[1]);
+  });
+
+  app.post('/api/logout', async (req) => { await logout(pool, /^Bearer (.+)$/.exec(req.headers.authorization ?? '')![1]); return { ok: true }; });
+  app.post('/api/me/password', async (req) => {
+    const b = z.object({ current: z.string().min(1), next: z.string().min(1) }).parse(req.body);
+    const c = await pool.connect();
+    try { await changeOwnPassword(c, req.actor.id, b.current, b.next, /^Bearer (.+)$/.exec(req.headers.authorization ?? '')![1]); } finally { c.release(); }
+    return { ok: true };
   });
 
   const read = <T>(fn: (db: import('./db/pool.js').Db, actor: Actor, req: FastifyRequest) => Promise<T>) => async (req: FastifyRequest) => {
@@ -86,6 +95,18 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
   cmd('/api/users', 'user.create', z.object({ username: z.string().min(3), displayName: z.string().min(1), password: z.string() }), (c, b) => admin.createUser(c, b), true);
   cmd('/api/users/:id/roles', 'access.assign', z.object({ roleKey: z.string(), siteId: id.nullish(), maxAmount: pos.nullish(), validUntil: z.string().nullish() }), (c, b, p) => admin.assignRole(c, { userId: p.id, ...b }), true);
   cmd('/api/users/:id/suspend', 'user.suspend', z.object({ reason: z.string().min(3) }), (c, b, p) => admin.suspendUser(c, { userId: p.id, reason: b.reason }));
+  cmd('/api/users/:id/update', 'user.update', z.object({ displayName: z.string().min(1).optional(), email: z.string().email().nullish() }), (c, b, p) => admin.updateUser(c, { userId: p.id, ...b }));
+  cmd('/api/users/:id/reactivate', 'user.reactivate', z.object({ reason: z.string().min(3) }), (c, b, p) => admin.reactivateUser(c, { userId: p.id, reason: b.reason }));
+  cmd('/api/users/:id/unlock', 'user.unlock', none, (c, _b, p) => admin.unlockUser(c, { userId: p.id }));
+  cmd('/api/users/:id/reset-password', 'user.password_reset', z.object({ temporaryPassword: z.string() }), (c, b, p) => admin.resetPassword(c, { userId: p.id, temporaryPassword: b.temporaryPassword }));
+  cmd('/api/access/:id/revoke', 'access.revoke', z.object({ reason: z.string().min(3) }), (c, b, p) => admin.revokeRole(c, { userRoleId: p.id, reason: b.reason }));
+  cmd('/api/roles', 'role.create', z.object({ key: z.string(), description: z.string(), permissions: z.array(z.string()) }), (c, b) => admin.createRole(c, b), true);
+  cmd('/api/roles/:key/permissions', 'role.permissions', z.object({ permissions: z.array(z.string()), reason: z.string().min(3) }), (c, b, p) => admin.setRolePermissions(c, { roleKey: p.key, ...b }));
+  cmd('/api/roles/:key/delete', 'role.delete', none, (c, _b, p) => admin.deleteRole(c, { roleKey: p.key }));
+  app.get('/api/users', read((db, a) => admin.listUsers(db, a.id).then((r) => { if (!r) throw new AppError(403, 'FORBIDDEN', 'Not permitted: user.view'); return r; })));
+  app.get('/api/login-events', read((db, a) => admin.listLoginEvents(db, a.id).then((r) => { if (!r) throw new AppError(403, 'FORBIDDEN', 'Not permitted: user.view'); return r; })));
+  app.get('/api/roles', read((db) => admin.listRoles(db)));
+  app.get('/api/permissions', read((db) => admin.permissionCatalogueRows(db)));
   cmd('/api/entities', 'org.entity.create', z.object({ name: z.string().min(1), gstin: z.string().optional(), state: z.string().optional() }), (c, b) => admin.createEntity(c, b), true);
   cmd('/api/sites', 'org.site.create', z.object({ entityId: id, code: z.string().min(1), name: z.string().min(1) }), (c, b) => admin.createSite(c, b), true);
   cmd('/api/locations', 'org.location.create', z.object({ siteId: id, code: z.string(), name: z.string(), kind: z.enum(['RECEIVING', 'STORE', 'RACK', 'TRANSIT', 'FLOOR', 'VENDOR', 'SCRAP']) }), (c, b) => admin.createLocation(c, b), true);
@@ -127,6 +148,40 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
   cmd('/api/adjustments', 'adjustment.propose', z.object({ lotId: id, locationId: id, qtyDelta: dec, reason: z.string().min(3), evidence: z.string().optional() }), (c, b) => inv.proposeAdjustment(c, b), true);
   cmd('/api/adjustments/:id/decide', 'adjustment.decide', z.object({ expectedVersion: ver, approve: z.boolean() }), (c, b, p) => inv.approveAdjustment(c, { adjustmentId: p.id, ...b }));
   cmd('/api/adjustments/:id/post', 'adjustment.post', ev, (c, b, p) => inv.postAdjustment(c, { adjustmentId: p.id, expectedVersion: b.expectedVersion }));
+
+  // ── HR & payroll ──
+  const hhmm = z.string().regex(/^\d{2}:\d{2}$/);
+  const period = z.string().regex(/^\d{4}-\d{2}$/);
+  app.get('/api/hr/reference', read((db) => hr.hrReference(db)));
+  app.get('/api/hr/employees', read((db, a, r) => hr.listEmployees(db, a.id, { includeExited: (r.query as { all?: string }).all === '1' })));
+  app.get('/api/hr/attendance', read((db, a, r) => { const x = z.object({ siteId: id, date }).parse(r.query); return hr.dailyAttendance(db, a.id, x.siteId, x.date).then((v) => { if (!v) throw new AppError(403, 'FORBIDDEN', 'Not permitted: hr.attendance.view'); return v; }); }));
+  app.get('/api/hr/employees/:id/attendance/:period', read((db, a, r) => { const p = r.params as { id: string; period: string }; return hr.monthlyAttendance(db, a.id, p.id, p.period); }));
+  app.get('/api/hr/employees/:id/leave-balance', read((db, _a, r) => hr.leaveBalance(db, (r.params as { id: string }).id)));
+  app.get('/api/hr/leave', read((db, a, r) => hr.listLeave(db, a.id, ((r.query as { scope?: string }).scope as 'mine' | 'team' | 'all') ?? 'mine')));
+  app.get('/api/hr/salary', read((db, a) => hr.listSalary(db, a.id).then((v) => { if (!v) throw new AppError(403, 'FORBIDDEN', 'Not permitted: hr.salary.view'); return v; })));
+  app.get('/api/hr/payroll', read((db, a) => hr.listPayrollRuns(db, a.id).then((v) => { if (!v) throw new AppError(403, 'FORBIDDEN', 'Not permitted: hr.payroll.view'); return v; })));
+  app.get('/api/hr/payslips', read((db, a, r) => hr.listPayslips(db, a.id, (r.query as { run?: string }).run)));
+
+  cmd('/api/hr/departments', 'hr.department.create', z.object({ code: z.string().min(1), name: z.string().min(1) }), (c, b) => hr.createDepartment(c, b), true);
+  cmd('/api/hr/designations', 'hr.designation.create', z.object({ code: z.string().min(1), name: z.string().min(1), grade: z.string().optional() }), (c, b) => hr.createDesignation(c, b), true);
+  cmd('/api/hr/shifts', 'hr.shift.create', z.object({ code: z.string().min(1), name: z.string().min(1), start: hhmm, end: hhmm, breakMin: z.number().int().min(0).optional(), graceMin: z.number().int().min(0).optional() }), (c, b) => hr.createShift(c, b), true);
+  cmd('/api/hr/holidays', 'hr.holiday.add', z.object({ date, name: z.string().min(1), siteId: id.nullish() }), (c, b) => hr.addHoliday(c, b), true);
+  cmd('/api/hr/employees', 'hr.employee.create', z.object({ name: z.string().min(1), siteId: id, joinDate: date, departmentId: id.nullish(), designationId: id.nullish(), managerId: id.nullish(), shiftId: id.nullish(), empType: z.enum(['permanent', 'contract', 'daily']).optional(), phone: z.string().nullish(), bankAccount: z.string().nullish(), pfApplicable: z.boolean().optional(), esiApplicable: z.boolean().optional(), userId: id.nullish() }), (c, b) => hr.createEmployee(c, b), true);
+  cmd('/api/hr/employees/:id/update', 'hr.employee.update', z.object({ expectedVersion: ver, changes: z.object({ name: z.string().min(1), departmentId: id.nullable(), designationId: id.nullable(), managerId: id.nullable(), shiftId: id.nullable(), phone: z.string().nullable(), bankAccount: z.string().nullable(), pfApplicable: z.boolean(), esiApplicable: z.boolean(), empType: z.enum(['permanent', 'contract', 'daily']), userId: id.nullable() }).partial() }), (c, b, p) => hr.updateEmployee(c, { employeeId: p.id, ...b }));
+  cmd('/api/hr/employees/:id/exit', 'hr.employee.exit', z.object({ expectedVersion: ver, exitDate: date, reason: z.string().min(3) }), (c, b, p) => hr.exitEmployee(c, { employeeId: p.id, ...b }));
+  cmd('/api/hr/attendance/mark', 'hr.attendance.mark', z.object({ employeeId: id, date, status: z.enum(['P', 'A', 'H', 'WO', 'HOL']).optional(), inTime: hhmm.nullish(), outTime: hhmm.nullish(), note: z.string().optional(), reason: z.string().optional() }), (c, b) => hr.markAttendance(c, b));
+  cmd('/api/hr/attendance/fill', 'hr.attendance.fill', z.object({ siteId: id, from: date, to: date }), (c, b) => hr.fillDefaultAttendance(c, b));
+  cmd('/api/hr/leave/allocate', 'hr.leave.allocate', z.object({ siteId: id, year: z.number().int().min(2000).max(2100) }), (c, b) => hr.allocateAnnualLeave(c, b));
+  cmd('/api/hr/leave/adjust', 'hr.leave.adjust', z.object({ employeeId: id, leaveType: z.string(), days: dec, reason: z.string().min(3), year: z.number().int().optional() }), (c, b) => hr.adjustLeave(c, b));
+  cmd('/api/hr/leave', 'hr.leave.apply', z.object({ employeeId: id.optional(), leaveType: z.string(), from: date, to: date, halfDay: z.boolean().optional(), reason: z.string().min(3) }), (c, b) => hr.applyLeave(c, b), true);
+  cmd('/api/hr/leave/:id/decide', 'hr.leave.decide', z.object({ expectedVersion: ver, approve: z.boolean(), note: z.string().optional() }), (c, b, p) => hr.decideLeave(c, { leaveId: p.id, ...b }));
+  cmd('/api/hr/leave/:id/cancel', 'hr.leave.cancel', z.object({ expectedVersion: ver, reason: z.string().min(3) }), (c, b, p) => hr.cancelLeave(c, { leaveId: p.id, ...b }));
+  cmd('/api/hr/salary', 'hr.salary.propose', z.object({ employeeId: id, effectiveFrom: date, basic: pos, hra: pos.optional(), otherAllowance: pos.optional() }), (c, b) => hr.proposeSalary(c, b), true);
+  cmd('/api/hr/salary/:id/decide', 'hr.salary.decide', z.object({ approve: z.boolean() }), (c, b, p) => hr.decideSalary(c, { salaryId: p.id, approve: b.approve }));
+  cmd('/api/hr/payroll', 'hr.payroll.create', z.object({ siteId: id, period }), (c, b) => hr.createPayrollRun(c, b), true);
+  cmd('/api/hr/payroll/:id/recalculate', 'hr.payroll.recalculate', ev, (c, b, p) => hr.recalculatePayrollRun(c, { runId: p.id, expectedVersion: b.expectedVersion }));
+  cmd('/api/hr/payroll/:id/approve', 'hr.payroll.approve', ev, (c, b, p) => hr.approvePayrollRun(c, { runId: p.id, expectedVersion: b.expectedVersion }));
+  cmd('/api/hr/payroll/:id/cancel', 'hr.payroll.cancel', z.object({ expectedVersion: ver, reason: z.string().min(3) }), (c, b, p) => hr.cancelPayrollRun(c, { runId: p.id, ...b }));
 
   return app;
 }

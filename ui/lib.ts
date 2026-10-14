@@ -36,6 +36,7 @@ const TONE: Record<string, string> = {
   completed: 'ok', closed: 'neutral', cancelled: 'bad',
   pending: 'neutral', inspecting: 'info', submitted: 'warn', accepted: 'ok', held: 'warn', rejected: 'bad', partial: 'warn',
   proposed: 'warn', posted: 'ok', active: 'ok', released_: 'neutral',
+  exited: 'neutral', suspended: 'bad', locked: 'bad', P: 'ok', A: 'bad', H: 'warn', L: 'info', LWP: 'warn', WO: 'neutral', HOL: 'neutral',
 };
 export const chip = (status: string, label?: string): Raw =>
   html`<span class="chip ${TONE[status] ?? 'neutral'}">${label ?? status.replace(/_/g, ' ')}</span>`;

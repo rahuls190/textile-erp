@@ -1,4 +1,4 @@
-# Textile ERP — foundation + stock core (slice 1)
+# Textile ERP — foundation, stock core, admin console and HR (slices 1–2)
 
 Built from *Textile ERP — Detailed process & system architecture* (design draft 1.0, 14 Oct 2026).
 This is the first real, database-backed slice: the platform rules every other module depends on, plus the
@@ -15,11 +15,35 @@ npm install
 npm run migrate                 # create the schema
 npm run seed:demo               # demo company, site, roles, users (password: Demo-Passw0rd!  — dev only)
 npm start                       # API on http://localhost:3000
-npm test                        # 52 tests, each file on a fresh database
+npm test                        # 79 tests, each file on a fresh database
 ```
 
 Try it: `POST /api/login` → use the token as `Authorization: Bearer …`. **Every write needs an `Idempotency-Key`
 header** (any unique string, 8–100 chars); repeating a key returns the original result and changes nothing.
+
+## Browser demo (no server needed)
+
+`docs/` is a complete clickable demo: the real engine and rules running on PostgreSQL-in-the-browser (PGlite).
+Data lives in the visitor's own browser; "Reset demo data" starts over. Rebuild with
+`node ui/build.mjs && cp ui/index.html ui/out/index.html` (needs the dev dependencies), then copy `ui/out/*` to `docs/`.
+Demo logins use the password above; the login screen has one-click person chips.
+
+## Admin console and HR (slice 2)
+
+| Area | Status |
+|---|---|
+| Real login: password strength, **lockout after 5 failures (15 min)**, forced change after a reset, sign-in log, session list, change own password (ends other sessions) | ✅ |
+| Users: create, edit, suspend/reactivate, unlock, reset password (ends sessions) | ✅ |
+| Roles are data: assign per site with amount limit and expiry, revoke with reason, **edit role permissions** (reason required), custom roles | ✅ |
+| Guards: no self-access changes, never remove the last administrator, admin role has no business approval power | ✅ |
+| HR: employee register (site-scoped, bank masked), departments, designations, shifts, holidays | ✅ |
+| Attendance (P/A/H/L/LWP/WO/HOL, late/overtime from the shift), locked once payroll is approved | ✅ |
+| Leave: yearly quota ledger (append-only), apply → line manager or HR approves (never yourself) | ✅ |
+| Payroll: salary structures (propose ≠ approve), monthly run (draft → recalculate → approve by a different person), immutable payslips, employees see only their own | ✅ |
+
+**Statutory payroll rates are defaults, not advice** (PF 12% on basic capped at ₹15,000, ESI 0.75%/3.25% up to ₹21,000 gross,
+professional tax ₹200 from ₹25,000, overtime at double the basic hourly rate). They live in `PAYROLL_RULES` in `src/domain/hr.ts`.
+Have your accountant confirm them for your state before paying anyone. Income-tax (TDS) is not handled.
 
 ## What is built (blueprint IDs)
 
@@ -48,8 +72,8 @@ are automated in `test/`.
 
 P01 planning · P03 vendor portal · W05 transfers · W07 split/slit · W08 supplier return/debit · W09 dead stock ·
 J01–J03 subcontracting · F01–F08 production · S01–S03 sales · A01–A04 finance/GST/e-invoice/e-way bill ·
-H/E/R people, maintenance, reports · **offline factory node + cloud sync** (the outbox and idempotency are the
-foundation for it) · any user interface · data migration tooling.
+recruitment/appraisal/loans, maintenance, reports · **offline factory node + cloud sync** (the outbox and idempotency are the
+foundation for it) · data migration tooling. (The browser demo is a prototype interface; a production front end is not built.)
 
 ## Decisions I made (change any of them)
 
@@ -62,5 +86,5 @@ foundation for it) · any user interface · data migration tooling.
 
 ## Before real factory use (not done)
 
-Rate limiting / lockout, TLS termination, secrets management, backups + restore rehearsal (RPO 15 min / RTO 4 h targets),
+Network rate limiting, TLS termination, email/SMS password reset (today an administrator issues a temporary password), secrets management, backups + restore rehearsal (RPO 15 min / RTO 4 h targets),
 load testing from the site survey, and statutory validation with your CA — all listed in the blueprint's decision register (p.61).

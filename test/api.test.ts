@@ -89,3 +89,28 @@ describe('HTTP API', () => {
     expect(r.statusCode).toBe(400); expect(JSON.stringify(r.json())).not.toMatch(/uuid|syntax|select|pg_/i);
   });
 });
+
+describe('admin and HR over HTTP', () => {
+  const login2 = async (u: string, p = 'Demo-Passw0rd!') => (await app.inject({ method: 'POST', url: '/api/login', payload: { username: u, password: p } }));
+  it('lists users only for administrators; sign-out ends the session; password change works', async () => {
+    const adm = (await login2('admin')).json().token; tokens.admin = adm;
+    expect((await call('buy', 'GET', '/api/users')).statusCode).toBe(403);
+    const users = await call('admin', 'GET', '/api/users');
+    expect(users.statusCode).toBe(200); expect(users.json().find((u: { username: string }) => u.username === 'sto').grants[0].role_key).toBe('STO');
+    expect((await call('admin', 'GET', '/api/roles')).json().some((r: { key: string }) => r.key === 'HRM')).toBe(true);
+    const t = (await login2('hre')).json().token; tokens.hre = t;
+    const ch = await call('hre', 'POST', '/api/me/password', { current: 'Demo-Passw0rd!', next: 'Fresh-Passw0rd-1' }, null);
+    expect(ch.statusCode).toBe(200);
+    expect((await login2('hre', 'Fresh-Passw0rd-1')).statusCode).toBe(200);
+    expect((await login2('hre')).statusCode).toBe(401);
+    await call('hre', 'POST', '/api/logout', {}, null);
+    expect((await call('hre', 'GET', '/api/hr/employees')).statusCode).toBe(401);
+  });
+
+  it('HR reads respect scope: a storekeeper sees only their own record and no salaries', async () => {
+    const emp = await call('sto', 'GET', '/api/hr/employees');
+    expect(emp.json().length).toBe(1);
+    expect((await call('sto', 'GET', '/api/hr/salary')).statusCode).toBe(403);
+    expect((await call('sto', 'GET', '/api/hr/payroll')).statusCode).toBe(403);
+  });
+});

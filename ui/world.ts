@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { runCommand, type Actor, type Ctx } from '../src/core/command.js';
 import { buildWorld, type World } from '../src/seed/demo.js';
+import { seedHrRecent } from '../src/seed/hr-demo.js';
 import type { LitePool } from './lite-pool.js';
 
 /** Rebuild the World handle from an already-seeded database (page reload with persisted data). */
@@ -24,9 +25,19 @@ export async function restoreWorld(pool: LitePool): Promise<World> {
   };
 }
 
+export async function isSeeded(pool: LitePool): Promise<boolean> {
+  const t = (await pool.query(`SELECT to_regclass('public.app_user') AS t`)).rows[0].t;
+  return !!t && (await pool.query('SELECT count(*)::int AS n FROM app_user')).rows[0].n > 0;
+}
+
 export async function openWorld(pool: LitePool, onStage: (s: string) => void): Promise<World> {
   const seeded = (await pool.query(`SELECT to_regclass('public.app_user') AS t`)).rows[0].t;
-  if (seeded && (await pool.query('SELECT count(*)::int AS n FROM app_user')).rows[0].n > 0) { onStage('Opening your saved demo…'); return restoreWorld(pool); }
+  if (seeded && (await pool.query('SELECT count(*)::int AS n FROM app_user')).rows[0].n > 0) {
+    onStage('Opening your demo…');
+    const world = await restoreWorld(pool);
+    if (!(await pool.query('SELECT 1 FROM attendance LIMIT 1')).rowCount) { onStage('Preparing this month\u2019s attendance and leave…'); await seedHrRecent(world); }
+    return world;
+  }
   onStage('Creating the demo company, roles and master data…');
   return buildWorld(pool as never);
 }

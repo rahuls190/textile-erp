@@ -1,89 +1,43 @@
 import { LitePool } from './lite-pool.js';
-import { openWorld } from './world.js';
-import { runWorkedExample, type Step } from './walkthrough.js';
+import { openWorld, isSeeded } from './world.js';
+import { runWorkedExample } from './walkthrough.js';
 import { html, raw, esc, qty, money, when, dateOnly, chip, type Raw } from './lib.js';
-import type { World } from '../src/seed/demo.js';
-import type { Ctx } from '../src/core/command.js';
+import { K, S, R, $, uid, read, val, toast, act, head, kv, DEMO_PASSWORD, PEOPLE, ORDER, type View, type Db } from './ctx.js';
 import { can } from '../src/core/permissions.js';
+import { login, logout, actorFromToken } from '../src/core/auth.js';
 import { qAdd, qSub } from '../src/core/qty.js';
 import * as po from '../src/domain/po.js';
 import * as rcv from '../src/domain/receipt.js';
 import * as qc from '../src/domain/qc.js';
 import * as inv from '../src/domain/inventory.js';
 import * as q from '../src/domain/queries.js';
-import { currentRate } from '../src/domain/masters.js';
+import * as hr from '../src/domain/hr.js';
+import * as A from './views-admin.js';
+import * as H from './views-hr.js';
 
 declare const __BUILD_ID__: string;
-type Db = import('../src/db/pool.js').Db;
 
-const PEOPLE: Record<string, { name: string; role: string }> = {
-  buy: { name: 'Asha Rao', role: 'Buyer' },
-  com: { name: 'Vikram Shah', role: 'Commercial approver · limit ₹5,00,000' },
-  sto: { name: 'Imran Qureshi', role: 'Storekeeper' },
-  qci: { name: 'Meera Nair', role: 'Quality inspector' },
-  qcm: { name: 'Dr. Suresh Pillai', role: 'Quality manager' },
-  inv: { name: 'Lakshmi Iyer', role: 'Inventory controller · limit 1,000 m' },
-  md: { name: 'Rahul Sharma', role: 'Master-data steward' },
-  eng: { name: 'Deepak Menon', role: 'Engineer / technical approver' },
-  fc: { name: 'Anita Desai', role: 'Finance controller' },
-  aud: { name: 'Karan Mehta', role: 'Auditor (read-only)' },
-  admin: { name: 'System admin', role: 'Administrator (no business approvals)' },
-};
-const ORDER = ['buy', 'com', 'sto', 'qci', 'qcm', 'inv', 'md', 'eng', 'fc', 'aud', 'admin'];
-
-type View = 'overview' | 'po' | 'receiving' | 'quality' | 'stock' | 'audit' | 'access';
-const NAV: { id: View; label: string; hint: string }[] = [
-  { id: 'overview', label: 'Overview', hint: 'Your role and the worked example' },
-  { id: 'po', label: 'Purchase orders', hint: 'Create, approve, release' },
-  { id: 'receiving', label: 'Receiving', hint: 'Material arriving at the gate' },
-  { id: 'quality', label: 'Quality', hint: 'Inspect and release' },
-  { id: 'stock', label: 'Stock', hint: 'Rolls, reservations, adjustments' },
-  { id: 'audit', label: 'Audit trail', hint: 'Who did what' },
-  { id: 'access', label: 'Roles & limits', hint: 'Who is allowed what' },
+type Item = { id: View; label: string; hint: string };
+const GROUPS: { title: string; key: 'ops' | 'people' | 'admin'; items: Item[] }[] = [
+  { title: 'Operations', key: 'ops', items: [
+    { id: 'po', label: 'Purchase orders', hint: 'Create, approve, release' },
+    { id: 'receiving', label: 'Receiving', hint: 'Material arriving at the gate' },
+    { id: 'quality', label: 'Quality', hint: 'Inspect and release' },
+    { id: 'stock', label: 'Stock', hint: 'Rolls, reservations, adjustments' } ] },
+  { title: 'People', key: 'people', items: [
+    { id: 'employees', label: 'Employees', hint: 'Register, reporting lines' },
+    { id: 'attendance', label: 'Attendance', hint: 'Daily marks, shifts, overtime' },
+    { id: 'leave', label: 'Leave', hint: 'Apply and approve' },
+    { id: 'payroll', label: 'Payroll', hint: 'Runs, salaries, payslips' } ] },
+  { title: 'Administration', key: 'admin', items: [
+    { id: 'users', label: 'Users', hint: 'Sign-ins, roles, suspension' },
+    { id: 'roles', label: 'Roles & permissions', hint: 'Who is allowed what' },
+    { id: 'audit', label: 'Audit trail', hint: 'Who did what' },
+    { id: 'signins', label: 'Sign-in log', hint: 'Every attempt' } ] },
 ];
+const ALL_VIEWS: View[] = ['overview', 'account', ...GROUPS.flatMap((g) => g.items.map((i) => i.id))];
 
-let world: World; let pool: LitePool;
-const S = { user: 'sto', view: 'overview' as View, poId: '', inspId: '', lotId: '', open: new Set<string>(), log: [] as Step[], running: false, filter: '' };
-
-const $ = (s: string) => document.querySelector(s) as HTMLElement;
-const uid = () => world.actors[S.user].id;
-async function read<T>(fn: (db: Db) => Promise<T>): Promise<T> {
-  const c = await pool.connect();
-  try { return await fn(c as never); } finally { c.release(); }
-}
-const val = (id: string) => (document.getElementById(id) as HTMLInputElement | null)?.value.trim() ?? '';
-
-// ───────────── feedback ─────────────
-function toast(msg: string, kind: 'ok' | 'bad' = 'ok', detail?: string) {
-  const el = document.createElement('div');
-  el.className = `toast ${kind}`;
-  el.innerHTML = `<strong>${kind === 'ok' ? 'Done' : 'Blocked'}</strong><span>${esc(msg)}</span>${detail ? `<small>${esc(detail)}</small>` : ''}`;
-  $('#toasts').appendChild(el);
-  setTimeout(() => el.remove(), kind === 'ok' ? 3200 : 7000);
-}
-async function act(label: string, fn: (c: Ctx) => Promise<unknown>) {
-  try { await world.as(S.user, fn); toast(label); await render(); }
-  catch (e) { const err = e as { code?: string; message?: string }; toast(err.message ?? 'Failed', 'bad', err.code); }
-}
-
-// ───────────── shell ─────────────
-function shell(content: Raw): string {
-  const me = PEOPLE[S.user];
-  return html`
-  <header class="top">
-    <div class="brand"><span class="mark" aria-hidden="true"></span><div><b>Textile ERP</b><small>Kalyani Plant 1 · demo data</small></div></div>
-    <label class="actor"><span>Acting as</span>
-      <select id="who" aria-label="Acting as">${ORDER.map((k) => html`<option value="${k}" ${k === S.user ? raw('selected') : ''}>${PEOPLE[k].name} — ${PEOPLE[k].role.split(' · ')[0]}</option>`)}</select>
-    </label>
-  </header>
-  <div class="frame">
-    <nav class="side" aria-label="Sections">${NAV.map((n) => html`<a href="#${n.id}" class="${n.id === S.view ? 'on' : ''}" data-view="${n.id}"><b>${n.label}</b><small>${n.hint}</small></a>`)}
-      <button class="ghost reset" data-act="reset">Reset demo data</button></nav>
-    <main id="main" aria-live="polite" aria-label="${me.role}">${content}</main>
-  </div>`.s;
-}
-
-const head = (title: string, sub: string, right?: Raw) => html`<div class="head"><div><h1>${title}</h1><p>${sub}</p></div>${right ?? ''}</div>`;
+let vis = { ops: true, users: false, audit: false };
 const rollBar = (r: { held: string; accepted: string; rejected: string; reserved: string; available: string }) => {
   const held = Number(r.held), rej = Number(r.rejected), res = Number(r.reserved), av = Math.max(Number(r.available), 0);
   const tot = held + rej + res + av || 1;
@@ -91,7 +45,6 @@ const rollBar = (r: { held: string; accepted: string; rejected: string; reserved
   return raw(`<div class="bar" role="img" aria-label="Held ${qty(r.held)}, available ${qty(r.available)}, reserved ${qty(r.reserved)}, rejected ${qty(r.rejected)}">${seg(av, 'av', 'Free')}${seg(res, 'rs', 'Reserved')}${seg(held, 'hd', 'On QC hold')}${seg(rej, 'rj', 'Rejected')}</div>`);
 };
 const legend = html`<div class="legend"><span><i class="av"></i>Free</span><span><i class="rs"></i>Reserved</span><span><i class="hd"></i>On QC hold</span><span><i class="rj"></i>Rejected</span></div>`;
-const kv = (k: string, v: unknown) => html`<div class="kv"><span>${k}</span><b>${v}</b></div>`;
 
 // ───────────── views ─────────────
 async function overview(): Promise<Raw> {
@@ -100,13 +53,16 @@ async function overview(): Promise<Raw> {
     const insp = await qc.listInspections(db, uid());
     const stock = await q.stockSummary(db, uid());
     const access = await q.myAccess(db, uid());
+    const people = await hr.listEmployees(db, uid());
+    const leaveWait = (await hr.listLeave(db, uid(), 'all')).filter((l) => l.status === 'pending' && l.applied_by !== uid()).length + (await hr.listLeave(db, uid(), 'team')).filter((l) => l.status === 'pending' && l.applied_by !== uid()).length;
     const checks: [string, string, string][] = [
       ['Approve a purchase order', 'po.approve', '120000'], ['Release a purchase order', 'po.release', '120000'], ['Receive material', 'receipt.post', ''],
       ['Release stock from QC hold', 'qc.release', ''], ['Reserve stock', 'reservation.allocate', ''], ['Approve a stock adjustment', 'adjustment.approve', '50'], ['Read the audit trail', 'audit.view', ''],
+      ['Approve payroll', 'hr.payroll.approve', ''], ['See salaries', 'hr.salary.view', ''], ['Manage users and roles', 'user.manage', ''],
     ];
     const perms = [] as { label: string; ok: boolean }[];
-    for (const [label, key, amt] of checks) perms.push({ label, ok: await can(db, uid(), key, { siteId: world.siteId, amount: amt || undefined, anySite: key === 'audit.view' }) });
-    return { pos, insp, stock, access, perms };
+    for (const [label, key, amt] of checks) perms.push({ label, ok: await can(db, uid(), key, { siteId: K.world.siteId, amount: amt || undefined, anySite: ['audit.view', 'user.manage'].includes(key) }) });
+    return { pos, insp, stock, access, perms, people, leaveWait };
   });
   const free = d.stock.reduce((a, s) => qAdd(a, s.available), '0');
   const kpi = (label: string, v: string | number, sub: string) => html`<div class="kpi"><span>${label}</span><b>${v}</b><small>${sub}</small></div>`;
@@ -118,6 +74,8 @@ async function overview(): Promise<Raw> {
     ${kpi('Open for receipt', d.pos.filter((p) => ['released', 'acknowledged', 'partial_receipt'].includes(p.status)).length, 'purchase orders')}
     ${kpi('Quality queue', d.insp.filter((i) => ['pending', 'inspecting', 'submitted', 'partial', 'held'].includes(i.status)).length, 'inspections')}
     ${kpi('Free stock', qty(free), 'metres, not held or reserved')}
+    ${d.people.length > 1 ? kpi('People', d.people.length, 'active employees') : ''}
+    ${kpi('Leave to decide', d.leaveWait, 'requests waiting for you')}
   </section>
   <section class="cols">
     <div class="card">
@@ -312,72 +270,145 @@ async function auditView(): Promise<Raw> {
   <tbody>${shown.map((r) => html`<tr><td>${when(r.at)}</td><td>${r.actor}</td><td class="mono">${r.action}</td><td>${r.entity_type.replace(/_/g, ' ')}</td><td>${r.reason ?? ''}</td></tr>`)}</tbody></table></div></div>`;
 }
 
-async function accessView(): Promise<Raw> {
-  const d = await read((db) => q.accessMatrix(db));
-  const by = (r: string) => d.holders.filter((h) => h.role_key === r);
+
+// ───────────── shell ─────────────
+const DEMO_NOTE = 'Demo data lives only in this browser. Every account uses the password shown here.';
+
+function shell(content: Raw): string {
+  const me = PEOPLE[S.user] ?? { name: S.user, role: '' };
+  const items = (g: (typeof GROUPS)[number]) => g.items.filter((n) => (g.key === 'admin' ? (n.id === 'roles' || (n.id === 'audit' ? vis.audit : vis.users)) : true));
   return html`
-  ${head('Roles & limits', 'Permission = role action + site + validity + approval limit. Denied unless all of them allow it.')}
-  <section class="roles">${d.roles.map((r) => html`
-    <article class="card"><div class="dh"><h2>${r.key}</h2><span class="muted">${by(r.key).map((h) => h.username).join(', ') || 'no users in this demo'}</span></div>
-      <p class="sub">${r.description}</p>
-      <div class="tags">${(r.permissions as string[]).map((p) => html`<span class="tag ${p.includes('banded') ? 'band' : ''}">${p.replace(' (banded)', '')}${p.includes('banded') ? ' ·limit' : ''}</span>`)}</div>
-      ${by(r.key).filter((h) => h.max_amount).map((h) => html`<p class="note">${h.username}: approval limit ${qty(h.max_amount)}</p>`)}
-    </article>`)}</section>`;
+  <header class="top">
+    <div class="brand"><span class="mark" aria-hidden="true"></span><div><b>Textile ERP</b><small>Kalyani Plant 1 · demo data</small></div></div>
+    <div class="who">
+      <label class="actor"><span>Demo: switch person</span>
+        <select id="who" aria-label="Switch person (demo shortcut: signs in with the demo password)">${ORDER.filter((k) => K.world.actors[k]).map((k) => html`<option value="${k}" ${k === S.user ? raw('selected') : ''}>${PEOPLE[k].name} — ${PEOPLE[k].role.split(' · ')[0]}</option>`)}</select></label>
+      <button class="ghost" data-view="account" title="My account">${me.name}</button><button data-act="signout">Sign out</button>
+    </div>
+  </header>
+  <div class="frame">
+    <nav class="side" aria-label="Sections">
+      <a href="#overview" class="${S.view === 'overview' ? 'on' : ''}" data-view="overview"><b>Overview</b><small>Your access and the worked examples</small></a>
+      ${GROUPS.filter((g) => g.key !== 'ops' || vis.ops).map((g) => html`<div class="grp">${g.title}</div>${items(g).map((n) => html`<a href="#${n.id}" class="${n.id === S.view ? 'on' : ''}" data-view="${n.id}"><b>${n.label}</b><small>${n.hint}</small></a>`)}`)}
+      <button class="ghost reset" data-act="reset">Reset demo data</button></nav>
+    <main id="main" aria-live="polite" aria-label="${me.role}">${S.mustChange ? html`<div class="pending"><b>Choose a new password to continue</b><span>You signed in with a temporary password.</span></div>` : ''}${content}</main>
+  </div>`.s;
 }
 
-const VIEWS: Record<View, () => Promise<Raw>> = { overview, po: poView, receiving: receivingView, quality: qualityView, stock: stockView, audit: auditView, access: accessView };
+function loginScreen(error = ''): string {
+  const users = ORDER.filter((k) => K.world.actors[k]);
+  return html`
+  <div class="login">
+    <form class="card form" data-form="login" autocomplete="off">
+      <div class="brand"><span class="mark" aria-hidden="true"></span><div><b>Textile ERP</b><small>Kalyani Plant 1 · demo</small></div></div>
+      <h1>Sign in</h1>
+      <label>Username<input id="lg-user" autocapitalize="none" spellcheck="false" autocomplete="username" /></label>
+      <label>Password<input id="lg-pass" type="password" autocomplete="current-password" /></label>
+      ${error ? html`<p class="err" role="alert">${error}</p>` : ''}
+      <button class="primary" type="submit">Sign in</button>
+      <p class="note">${DEMO_NOTE} Demo password: <span class="mono">${DEMO_PASSWORD}</span>. Try five wrong passwords to see the lockout; sign in as <span class="mono">admin</span> to unlock the account.</p>
+    </form>
+    <div class="card"><h2>Pick a person</h2><p class="sub">Click one to fill the sign-in form. Each sees and can do something different.</p>
+      <div class="people">${users.map((k) => html`<button type="button" data-fill="${k}"><b>${PEOPLE[k].name}</b><small>${PEOPLE[k].role.split(' · ')[0]} · <span class="mono">${k}</span></small></button>`)}</div></div>
+  </div>`.s;
+}
+
+async function computeVis() {
+  vis = await read(async (db) => ({
+    ops: (await Promise.all(['po.view', 'inventory.view', 'qc.view', 'receipt.view'].map((p) => can(db, uid(), p, { anySite: true })))).some(Boolean),
+    users: await can(db, uid(), 'user.view', { anySite: true }),
+    audit: await can(db, uid(), 'audit.view', { anySite: true }),
+  }));
+}
+
+const VIEWS: Record<View, () => Promise<Raw>> = {
+  overview, po: poView, receiving: receivingView, quality: qualityView, stock: stockView, audit: auditView,
+  employees: H.employeesView, attendance: H.attendanceView, leave: H.leaveView, payroll: H.payrollView,
+  users: A.usersView, roles: A.rolesView, signins: A.signinsView, account: A.accountView,
+};
 
 let queued = false;
 function scheduleRender() { if (queued) return; queued = true; setTimeout(() => { queued = false; void render(); }, 0); }
+R.scheduleRender = scheduleRender;
 
 async function render() {
+  if (!S.user) { $('#app').innerHTML = loginScreen(loginError); return; }
   const keep = { y: window.scrollY, f: document.activeElement?.id };
+  await computeVis();
+  if (S.mustChange) S.view = 'account';
+  if (!ALL_VIEWS.includes(S.view)) S.view = 'overview';
   const content = await VIEWS[S.view]().catch((e) => html`<div class="card"><h2>Something went wrong</h2><p class="note">${(e as Error).message}</p></div>`);
   $('#app').innerHTML = shell(content);
   window.scrollTo(0, keep.y);
   if (keep.f) (document.getElementById(keep.f) as HTMLElement | null)?.focus();
 }
+R.render = render;
+
+// ───────────── sign-in ─────────────
+let loginError = '';
+async function signIn(username: string, password: string): Promise<boolean> {
+  try {
+    const r = await login(K.pool as never, username, password);
+    if (!K.world.actors[username]) K.world.actors[username] = r.actor;
+    S.user = username; S.token = r.token; S.mustChange = r.mustChangePassword; loginError = '';
+    try { sessionStorage.setItem('erp-token', r.token); } catch { /* optional */ }
+    S.view = r.mustChangePassword ? 'account' : (S.view === 'account' ? 'overview' : S.view);
+    return true;
+  } catch (e) { loginError = (e as Error).message; return false; }
+}
+async function signOut() {
+  try { await logout(K.pool as never, S.token); } catch { /* already gone */ }
+  try { sessionStorage.removeItem('erp-token'); } catch { /* optional */ }
+  S.user = ''; S.token = ''; S.mustChange = false; S.userSel = S.roleSel = S.empId = S.attEmp = ''; S.roleDraft = null; loginError = '';
+  await render();
+}
 
 // ───────────── events ─────────────
 const poVer = async (c: { db: Db }) => (await c.db.query('SELECT version FROM purchase_order WHERE id=$1', [S.poId])).rows[0].version as number;
+const insVer = async (c: { db: Db }) => (await c.db.query('SELECT version FROM qc_inspection WHERE id=$1', [S.inspId])).rows[0].version as number;
 const reasonOr = (d: string) => val('reason') || d;
 
 document.addEventListener('click', async (ev) => {
   const t = ev.target as HTMLElement;
+  const fill = t.closest('[data-fill]') as HTMLElement | null;
+  if (fill) { (document.getElementById('lg-user') as HTMLInputElement).value = fill.dataset.fill!; (document.getElementById('lg-pass') as HTMLInputElement).value = DEMO_PASSWORD; (document.getElementById('lg-pass') as HTMLElement).focus(); return; }
   const nav = t.closest('[data-view]') as HTMLElement | null;
-  if (nav) { ev.preventDefault(); S.view = nav.dataset.view as View; history.replaceState(null, '', '#' + S.view); return render(); }
+  if (nav) { ev.preventDefault(); if (S.mustChange) return toast('Choose a new password first', 'bad'); S.view = nav.dataset.view as View; history.replaceState(null, '', '#' + S.view); return render(); }
+  if (await A.onClick(t)) return;
+  if (await H.onClick(t)) return;
   const pp = t.closest('[data-pick-po]') as HTMLElement | null; if (pp) { S.poId = pp.dataset.pickPo!; return render(); }
   const pq = t.closest('[data-pick-qc]') as HTMLElement | null; if (pq) { S.inspId = pq.dataset.pickQc!; return render(); }
   const pl = t.closest('[data-pick-lot]') as HTMLElement | null; if (pl) { S.lotId = S.lotId === pl.dataset.pickLot ? '' : pl.dataset.pickLot!; return render(); }
   const b = t.closest('[data-act]') as HTMLElement | null; if (!b) return;
   const a = b.dataset.act!, id = b.dataset.id ?? '', v = Number(b.dataset.v ?? 0);
   switch (a) {
+    case 'signout': return signOut();
     case 'toggle-newpo': S.open.has('newpo') ? S.open.delete('newpo') : S.open.add('newpo'); return render();
-    case 'po-submit': return act('Submitted for approval', async (c) => po.submitPO(c, { poId: S.poId, expectedVersion: await poVer(c) }));
-    case 'po-approve': return act('Approved', async (c) => po.approvePO(c, { poId: S.poId, expectedVersion: await poVer(c) }));
-    case 'po-release': return act('Released to vendor', async (c) => po.releasePO(c, { poId: S.poId, expectedVersion: await poVer(c) }));
-    case 'po-return': return act('Returned', async (c) => po.returnPO(c, { poId: S.poId, expectedVersion: await poVer(c), reason: reasonOr('') }));
-    case 'po-cancel': return act('Order closed', async (c) => po.cancelPO(c, { poId: S.poId, expectedVersion: await poVer(c), reason: reasonOr('') }));
-    case 'po-amend': return act('Amendment proposed. It applies only after approval', async (c) => {
+    case 'po-submit': return void act('Submitted for approval', async (c) => po.submitPO(c, { poId: S.poId, expectedVersion: await poVer(c) }));
+    case 'po-approve': return void act('Approved', async (c) => po.approvePO(c, { poId: S.poId, expectedVersion: await poVer(c) }));
+    case 'po-release': return void act('Released to vendor', async (c) => po.releasePO(c, { poId: S.poId, expectedVersion: await poVer(c) }));
+    case 'po-return': return void act('Returned', async (c) => po.returnPO(c, { poId: S.poId, expectedVersion: await poVer(c), reason: reasonOr('') }));
+    case 'po-cancel': return void act('Order closed', async (c) => po.cancelPO(c, { poId: S.poId, expectedVersion: await poVer(c), reason: reasonOr('') }));
+    case 'po-amend': return void act('Amendment proposed. It applies only after approval', async (c) => {
       const lines = (await c.db.query('SELECT id, rate FROM po_line WHERE po_id=$1', [S.poId])).rows;
       const bump = (r: string) => (Math.round(Number(r) * 1.05 * 10000) / 10000).toFixed(4);
       return po.amendPO(c, { poId: S.poId, expectedVersion: await poVer(c), reason: reasonOr('Vendor price revision'), changes: lines.map((l) => ({ lineId: l.id, rate: bump(l.rate) })) });
     });
-    case 'qc-start': return act('Inspection started', (c) => qc.startInspection(c, { inspectionId: S.inspId }));
-    case 'unreserve': return act('Reservation released', (c) => inv.releaseReservation(c, { reservationId: id, reason: 'Released from the stock screen' }));
-    case 'adj-yes': return act('Adjustment approved', (c) => inv.approveAdjustment(c, { adjustmentId: id, expectedVersion: v, approve: true }));
-    case 'adj-no': return act('Adjustment rejected', (c) => inv.approveAdjustment(c, { adjustmentId: id, expectedVersion: v, approve: false }));
-    case 'adj-post': return act('Adjustment posted to the ledger', (c) => inv.postAdjustment(c, { adjustmentId: id, expectedVersion: v }));
+    case 'qc-start': return void act('Inspection started', (c) => qc.startInspection(c, { inspectionId: S.inspId }));
+    case 'unreserve': return void act('Reservation released', (c) => inv.releaseReservation(c, { reservationId: id, reason: 'Released from the stock screen' }));
+    case 'adj-yes': return void act('Adjustment approved', (c) => inv.approveAdjustment(c, { adjustmentId: id, expectedVersion: v, approve: true }));
+    case 'adj-no': return void act('Adjustment rejected', (c) => inv.approveAdjustment(c, { adjustmentId: id, expectedVersion: v, approve: false }));
+    case 'adj-post': return void act('Adjustment posted to the ledger', (c) => inv.postAdjustment(c, { adjustmentId: id, expectedVersion: v }));
     case 'walk': {
       S.running = true; S.log = []; await render();
-      try { const r = await runWorkedExample(world, (s) => { S.log.push(s); scheduleRender(); }); S.poId = r.poId; S.lotId = r.lotId; toast('Worked example complete'); }
+      try { const r = await runWorkedExample(K.world, (s) => { S.log.push(s); scheduleRender(); }); S.poId = r.poId; S.lotId = r.lotId; toast('Worked example complete'); }
       catch (e) { toast((e as Error).message, 'bad'); }
       S.running = false; return render();
     }
     case 'reset': {
       b.textContent = 'Resetting…';
-      try { await pool.db.close(); } catch { /* already closed */ }
-      try { indexedDB.deleteDatabase('/pglite/' + dbName()); } catch { /* ignore */ }
+      try { await K.pool.db.close(); } catch { /* already closed */ }
+      try { sessionStorage.removeItem('erp-token'); indexedDB.deleteDatabase('/pglite/' + dbName()); } catch { /* ignore */ }
       setTimeout(() => location.reload(), 400);
     }
   }
@@ -386,34 +417,42 @@ document.addEventListener('click', async (ev) => {
 document.addEventListener('submit', async (ev) => {
   ev.preventDefault();
   const f = (ev.target as HTMLElement).closest('[data-form]') as HTMLElement | null; if (!f) return;
+  if (f.dataset.form === 'login') { if (await signIn(val('lg-user'), (document.getElementById('lg-pass') as HTMLInputElement).value)) return render(); return render(); }
+  if (await A.onSubmit(f.dataset.form!)) return;
+  if (await H.onSubmit(f.dataset.form!)) return;
   switch (f.dataset.form) {
     case 'newpo': {
       const partnerId = val('f-vendor'), itemId = val('f-item');
-      return act('Draft purchase order created', async (c) => { const p = await po.createPO(c, { siteId: world.siteId, partnerId, lines: [{ itemId, qty: val('f-qty'), dueDate: val('f-due') || null }] }); S.poId = p.id; S.open.delete('newpo'); return p; });
+      return void act('Draft purchase order created', async (c) => { const p = await po.createPO(c, { siteId: K.world.siteId, partnerId, lines: [{ itemId, qty: val('f-qty'), dueDate: val('f-due') || null }] }); S.poId = p.id; S.open.delete('newpo'); return p; });
     }
     case 'receive': {
       const [poLineId, itemId] = val('r-line').split('|'); const poId = val('r-po');
-      return act('Receipt posted. The roll is on QC hold', (c) => rcv.postReceipt(c, { siteId: world.siteId, partnerId: world.vendorId, poId, challanNo: val('r-challan'), lines: [{ poLineId, itemId, qty: val('r-qty') }] }));
+      return void act('Receipt posted. The roll is on QC hold', (c) => rcv.postReceipt(c, { siteId: K.world.siteId, partnerId: K.world.vendorId, poId, challanNo: val('r-challan'), lines: [{ poLineId, itemId, qty: val('r-qty') }] }));
     }
-    case 'qc-submit': return act('Recommendation recorded', async (c) => qc.submitInspection(c, { inspectionId: S.inspId, expectedVersion: await insVer(c), inspectedQty: val('q-sample'), recommendAccept: val('q-ra'), recommendReject: val('q-rr') }));
-    case 'qc-disp': return act('Disposition recorded', async (c) => qc.dispositionInspection(c, { inspectionId: S.inspId, expectedVersion: await insVer(c), acceptQty: val('d-acc'), rejectQty: val('d-rej') }));
-    case 'reserve': return act('Stock reserved', (c) => inv.reserveStock(c, { lotId: S.lotId, qty: val('s-qty'), demandType: 'cut_order', demandRef: val('s-ref') }));
-    case 'putaway': return act('Stock moved', async (c) => {
+    case 'qc-submit': return void act('Recommendation recorded', async (c) => qc.submitInspection(c, { inspectionId: S.inspId, expectedVersion: await insVer(c), inspectedQty: val('q-sample'), recommendAccept: val('q-ra'), recommendReject: val('q-rr') }));
+    case 'qc-disp': return void act('Disposition recorded', async (c) => qc.dispositionInspection(c, { inspectionId: S.inspId, expectedVersion: await insVer(c), acceptQty: val('d-acc'), rejectQty: val('d-rej') }));
+    case 'reserve': return void act('Stock reserved', (c) => inv.reserveStock(c, { lotId: S.lotId, qty: val('s-qty'), demandType: 'cut_order', demandRef: val('s-ref') }));
+    case 'putaway': return void act('Stock moved', async (c) => {
       const from = (await c.db.query(`SELECT location_id FROM stock_ledger WHERE lot_id=$1 AND status='ACCEPTED' GROUP BY location_id HAVING SUM(qty) > 0 ORDER BY SUM(qty) DESC LIMIT 1`, [S.lotId])).rows[0];
       if (!from) throw Object.assign(new Error('There is no accepted stock on this roll to move'), { code: 'NOTHING_TO_MOVE' });
       return inv.putaway(c, { lotId: S.lotId, fromLocationId: from.location_id, toLocationId: val('p-to'), qty: val('p-qty') });
     });
-    case 'adjust': return act('Adjustment proposed. A different person must approve it', async (c) => {
+    case 'adjust': return void act('Adjustment proposed. A different person must approve it', async (c) => {
       const at = (await c.db.query(`SELECT location_id FROM stock_ledger WHERE lot_id=$1 AND status='ACCEPTED' GROUP BY location_id HAVING SUM(qty) > 0 ORDER BY SUM(qty) DESC LIMIT 1`, [S.lotId])).rows[0];
-      return inv.proposeAdjustment(c, { lotId: S.lotId, locationId: at?.location_id ?? world.loc.rcv, qtyDelta: val('a-qty'), reason: val('a-reason') });
+      return inv.proposeAdjustment(c, { lotId: S.lotId, locationId: at?.location_id ?? K.world.loc.rcv, qtyDelta: val('a-qty'), reason: val('a-reason') });
     });
   }
 });
-const insVer = async (c: { db: Db }) => (await c.db.query('SELECT version FROM qc_inspection WHERE id=$1', [S.inspId])).rows[0].version as number;
 
-document.addEventListener('change', (ev) => {
+document.addEventListener('change', async (ev) => {
   const t = ev.target as HTMLInputElement;
-  if (t.id === 'who') { S.user = t.value; try { localStorage.setItem('erp-user', S.user); } catch { /* optional */ } render(); }
+  if (t.id === 'who') {
+    const ok = await signIn(t.value, DEMO_PASSWORD);
+    if (!ok) { toast(`Could not switch: ${loginError}. Sign in with that person's own password.`, 'bad'); S.user = ''; }
+    return render();
+  }
+  if (t.dataset.perm) return A.togglePerm(t.dataset.perm);
+  if (t.id === 'att-date' && t.value) { S.attDate = t.value; return render(); }
   if (t.hasAttribute('data-reload-po')) { S.poId = t.value; render(); }
 });
 document.addEventListener('input', (ev) => {
@@ -429,18 +468,30 @@ async function boot() {
   try {
     stage('Loading the database engine…');
     const base = new URL('.', document.baseURI).href;
-    const [wasm, initdb, data] = await Promise.all([
+    const [wasm, initdb, data, seed] = await Promise.all([
       WebAssembly.compileStreaming(fetch(base + 'engine/pglite.wasm')),
       WebAssembly.compileStreaming(fetch(base + 'engine/initdb.wasm')),
       fetch(base + 'engine/pglite-data.ogg').then((r) => r.blob()),
+      fetch(base + 'engine/demo-seed.ogg').then((r) => (r.ok ? r.blob() : null)).catch(() => null),
     ]);
     stage('Starting PostgreSQL in your browser…');
     const opts = { pgliteWasmModule: wasm, initdbWasmModule: initdb, fsBundle: data };
-    try { pool = await LitePool.create('idb://' + dbName(), opts); }
-    catch { pool = await LitePool.create(undefined, opts); }   // storage blocked: run in memory
-    world = await openWorld(pool, stage);
-    try { const u = localStorage.getItem('erp-user'); if (u && PEOPLE[u]) S.user = u; } catch { /* optional */ }
-    const h = location.hash.slice(1) as View; if (NAV.some((n) => n.id === h)) S.view = h;
+    const withSeed = seed ? { ...opts, loadDataDir: seed } : opts;
+    const idbName = '/pglite/' + dbName();
+    const exists = await indexedDB.databases?.().then((l) => l.some((d) => d.name === idbName)).catch(() => null) ?? null;
+    try {
+      K.pool = await LitePool.create('idb://' + dbName(), exists === true ? opts : withSeed);
+      if (seed && !(await isSeeded(K.pool))) {       // an empty or half-made store: start again from the snapshot
+        await K.pool.db.close(); indexedDB.deleteDatabase(idbName);
+        K.pool = await LitePool.create('idb://' + dbName(), withSeed);
+      }
+    } catch { K.pool = await LitePool.create(undefined, withSeed); }   // storage blocked: run in memory
+    K.world = await openWorld(K.pool, stage);
+    try {
+      const tok = sessionStorage.getItem('erp-token');
+      if (tok) { const a = await actorFromToken(K.pool as never, tok); S.user = a.username; S.token = tok; S.mustChange = !!(await K.pool.query('SELECT must_change_password FROM app_user WHERE id=$1', [a.id])).rows[0]?.must_change_password; }
+    } catch { /* no valid session: show sign-in */ }
+    const h = location.hash.slice(1) as View; if (ALL_VIEWS.includes(h)) S.view = h;
     $('#boot').remove();
     await render();
   } catch (e) {
@@ -449,5 +500,5 @@ async function boot() {
     console.error(e);
   }
 }
-(window as unknown as { __erp: unknown }).__erp = { S };
+(window as unknown as { __erp: unknown }).__erp = { S, K };
 void boot();

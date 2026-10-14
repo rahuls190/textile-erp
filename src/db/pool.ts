@@ -11,4 +11,4 @@ export function createPool(url = process.env.DATABASE_URL ?? DEFAULT_URL, max = 
   return new pg.Pool({ connectionString: url, max });
 }
 export type Pool = pg.Pool;
-export type Db = pg.PoolClient;
+export type Db = Pick<pg.PoolClient, 'query'>;

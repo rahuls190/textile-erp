@@ -5,9 +5,9 @@ export class LitePool {
   private tail: Promise<void> = Promise.resolve();
   constructor(public db: PGlite) {}
 
-  static async create(dataDir?: string, wasm?: { pgliteWasmModule?: WebAssembly.Module; initdbWasmModule?: WebAssembly.Module; fsBundle?: Blob }) {
+  static async create(dataDir?: string, wasm?: { pgliteWasmModule?: WebAssembly.Module; initdbWasmModule?: WebAssembly.Module; fsBundle?: Blob; loadDataDir?: Blob }) {
     const db = new PGlite({
-      dataDir,
+      dataDir, relaxedDurability: true,
       ...(wasm ?? {}),
       parsers: { [types.NUMERIC]: (v: string) => v, [types.INT8]: (v: string) => v, [types.DATE]: (v: string) => v },
     });

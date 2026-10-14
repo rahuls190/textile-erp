@@ -12,11 +12,11 @@ const shim = {
   setup(b) {
     const to = (re, file) => b.onResolve({ filter: re }, () => ({ path: resolve(root, file) }));
     to(/^node:crypto$/, 'ui/shims/crypto.ts');
-    to(/core\/auth(\.js)?$/, 'ui/shims/auth.ts');
+    to(/(^|\/)password(\.js)?$/, 'ui/shims/password.ts');
     to(/(^|\/)migrate(\.js)?$/, 'ui/shims/migrate.ts');
   },
 };
-const sig = createHash('sha1').update(readFileSync(resolve(root, 'src/db/migrations/001_init.sql'))).digest('hex').slice(0, 8);
+const sig = createHash('sha1').update(readFileSync(resolve(root, 'src/db/migrations/001_init.sql'))).update(readFileSync(resolve(root, 'src/db/migrations/002_admin_hr.sql'))).update(readFileSync(resolve(root, 'src/seed/hr-demo.ts'))).update(readFileSync(resolve(root, 'src/seed/demo.ts'))).update(readFileSync(resolve(root, 'src/seed/rbac.ts'))).update('v3').digest('hex').slice(0, 8);
 await build({
   entryPoints: [resolve(root, 'ui/main.ts')],
   outfile: resolve(out, 'app.js'),
@@ -27,5 +27,7 @@ await build({
   logLevel: 'warning',
 });
 const pg = resolve(root, 'node_modules/@electric-sql/pglite/dist');
-for (const f of ['pglite.wasm', 'initdb.wasm', 'pglite.data']) copyFileSync(resolve(pg, f), resolve(out, 'engine', f));
+for (const [f, to] of [['pglite.wasm', 'pglite.wasm'], ['initdb.wasm', 'initdb.wasm'], ['pglite.data', 'pglite-data.ogg']]) copyFileSync(resolve(pg, f), resolve(out, 'engine', to));
+import { execFileSync } from 'node:child_process';
+execFileSync('npx', ['tsx', 'ui/make-snapshot.ts'], { cwd: root, stdio: 'inherit' });
 console.log('built', sig);

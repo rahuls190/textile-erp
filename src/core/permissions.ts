@@ -18,7 +18,7 @@ export async function can(db: Db, userId: string, permission: string, scope: Sco
        FROM user_role ur
        JOIN app_user u ON u.id = ur.user_id AND u.active
        JOIN role_permission rp ON rp.role_key = ur.role_key AND rp.permission = $2
-      WHERE ur.user_id = $1
+      WHERE ur.user_id = $1 AND ur.revoked_at IS NULL
         AND ur.valid_from <= now() AND (ur.valid_until IS NULL OR ur.valid_until > now())
         AND (ur.site_id IS NULL OR $5::boolean OR ($3::uuid IS NOT NULL AND ur.site_id = $3::uuid))
         AND (NOT rp.banded OR $4::numeric IS NULL OR (ur.max_amount IS NOT NULL AND $4::numeric <= ur.max_amount))
@@ -48,7 +48,7 @@ export async function visibleSites(db: Db, userId: string, permission: string): 
        FROM user_role ur
        JOIN app_user u ON u.id = ur.user_id AND u.active
        JOIN role_permission rp ON rp.role_key = ur.role_key AND rp.permission = $2
-      WHERE ur.user_id = $1 AND ur.valid_from <= now() AND (ur.valid_until IS NULL OR ur.valid_until > now())`,
+      WHERE ur.user_id = $1 AND ur.revoked_at IS NULL AND ur.valid_from <= now() AND (ur.valid_until IS NULL OR ur.valid_until > now())`,
     [userId, permission]);
   if (r.rows.some((x) => x.site_id === null)) return null;
   return [...new Set(r.rows.map((x) => x.site_id as string))];

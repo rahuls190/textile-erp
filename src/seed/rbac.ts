@@ -7,10 +7,10 @@ import type { Pool } from '../db/pool.js';
  */
 export const ROLES: Record<string, { description: string; perms: string[] }> = {
   ADM: { description: 'System / access administrator (no business approval power)',
-         perms: ['user.manage', 'access.assign', 'site.provision', 'audit.view'] },
+         perms: ['user.manage', 'user.view', 'access.assign', 'role.manage', 'site.provision', 'audit.view'] },
   MD: { description: 'Master-data steward / managing director',
         perms: ['org.create', 'org.edit', 'unit.create', 'item.create', 'item.edit', 'item.submit', 'item.view',
-                'partner.create', 'partner.submit', 'partner.view', 'inventory.view', 'po.view'] },
+                'partner.create', 'partner.submit', 'partner.view', 'inventory.view', 'po.view', 'hr.salary.propose', 'hr.salary.approve'] },
   ENG: { description: 'Engineer / technical approver',
          perms: ['item.create', 'item.edit', 'item.submit', 'item.approve', 'item.view', 'inventory.view'] },
   BUY: { description: 'Buyer',
@@ -33,12 +33,40 @@ export const ROLES: Record<string, { description: string; perms: string[] }> = {
   PPC: { description: 'Production planner',
          perms: ['reservation.allocate', 'inventory.view', 'item.view', 'po.view'] },
   FC: { description: 'Finance controller',
-        perms: ['org.approve', 'partner.bank.approve', 'partner.bank.view', 'partner.view', 'po.view', 'inventory.view', 'audit.view'] },
+        perms: ['hr.salary.approve', 'hr.salary.view', 'hr.payroll.approve', 'hr.payroll.view', 'hr.employee.view', 'hr.bank.view', 'org.approve', 'partner.bank.approve', 'partner.bank.view', 'partner.view', 'po.view', 'inventory.view', 'audit.view'] },
   AUD: { description: 'Auditor (read-only)',
-         perms: ['audit.view', 'inventory.view', 'po.view', 'item.view', 'partner.view', 'receipt.view', 'qc.view'] },
+         perms: ['audit.view', 'user.view', 'hr.employee.view', 'hr.attendance.view', 'hr.leave.view', 'inventory.view', 'po.view', 'item.view', 'partner.view', 'receipt.view', 'qc.view'] },
+  HRM: { description: 'HR manager',
+         perms: ['hr.org.manage', 'hr.employee.view', 'hr.employee.create', 'hr.employee.edit', 'hr.employee.exit', 'hr.bank.view',
+                 'hr.attendance.view', 'hr.attendance.mark', 'hr.attendance.correct', 'hr.shift.manage',
+                 'hr.leave.view', 'hr.leave.approve', 'hr.leave.approve.any', 'hr.leave.grant',
+                 'hr.salary.propose', 'hr.salary.view', 'hr.payroll.create', 'hr.payroll.view'] },
+  HRE: { description: 'HR executive (no salary access)',
+         perms: ['hr.employee.view', 'hr.employee.create', 'hr.employee.edit', 'hr.attendance.view', 'hr.attendance.mark', 'hr.leave.view'] },
+  SUP: { description: 'Line supervisor (own team)',
+         perms: ['hr.employee.view', 'hr.attendance.view', 'hr.attendance.mark', 'hr.leave.view', 'hr.leave.approve'] },
 };
 
+/** Display name for a permission key's area, used by the admin console. */
+export const AREAS: Record<string, string> = {
+  user: 'Users', access: 'Access', role: 'Roles', site: 'Sites', audit: 'Audit', org: 'Organisation', unit: 'Units', item: 'Items',
+  partner: 'Partners', rate: 'Rates', po: 'Purchase orders', receipt: 'Receiving', qc: 'Quality', putaway: 'Putaway',
+  reservation: 'Reservations', adjustment: 'Adjustments', location: 'Locations', inventory: 'Inventory', hr: 'HR & payroll',
+};
+
+/** Every known permission, derived from the role catalogue (plus anything the console adds later). */
+export function permissionCatalogue(): { key: string; area: string; label: string; bandable: boolean }[] {
+  const seen = new Map<string, boolean>();
+  for (const def of Object.values(ROLES)) for (const p of def.perms) seen.set(p.replace('~', ''), p.endsWith('~') || (seen.get(p.replace('~', '')) ?? false));
+  return [...seen.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, bandable]) => {
+    const [area, ...rest] = key.split('.');
+    return { key, area: AREAS[area] ?? area, label: rest.join(' ').replace(/\./g, ' '), bandable };
+  });
+}
+
 export async function seedRbac(pool: Pool): Promise<void> {
+  for (const p of permissionCatalogue())
+    await pool.query(`INSERT INTO permission_def(key, area, label, bandable) VALUES ($1,$2,$3,$4) ON CONFLICT (key) DO UPDATE SET area=EXCLUDED.area, label=EXCLUDED.label, bandable=EXCLUDED.bandable`, [p.key, p.area, p.label, p.bandable]);
   for (const [key, def] of Object.entries(ROLES)) {
     await pool.query(
       `INSERT INTO role(key, description) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET description=EXCLUDED.description`,

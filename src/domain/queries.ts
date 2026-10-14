@@ -63,7 +63,7 @@ export async function myAccess(db: Db, userId: string) {
     `SELECT ur.role_key AS role, s.code AS site, ur.max_amount, ur.valid_until,
             array_agg(rp.permission ORDER BY rp.permission) AS permissions
        FROM user_role ur LEFT JOIN site s ON s.id = ur.site_id JOIN role_permission rp ON rp.role_key = ur.role_key
-      WHERE ur.user_id=$1 AND ur.valid_from <= now() AND (ur.valid_until IS NULL OR ur.valid_until > now())
+      WHERE ur.user_id=$1 AND ur.revoked_at IS NULL AND ur.valid_from <= now() AND (ur.valid_until IS NULL OR ur.valid_until > now())
       GROUP BY ur.id, s.code`, [userId])).rows;
 }
 
@@ -99,7 +99,7 @@ export async function accessMatrix(db: Db) {
        FROM role r JOIN role_permission rp ON rp.role_key = r.key GROUP BY r.key, r.description ORDER BY r.key`)).rows;
   const holders = (await db.query(
     `SELECT u.username, u.display_name, ur.role_key, s.code AS site, ur.max_amount
-       FROM user_role ur JOIN app_user u ON u.id = ur.user_id LEFT JOIN site s ON s.id = ur.site_id ORDER BY u.username`)).rows;
+       FROM user_role ur JOIN app_user u ON u.id = ur.user_id LEFT JOIN site s ON s.id = ur.site_id WHERE ur.revoked_at IS NULL ORDER BY u.username`)).rows;
   return { roles, holders };
 }
 

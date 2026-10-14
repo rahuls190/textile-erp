@@ -1,3 +1,4 @@
+import * as hr from '../src/domain/hr.js';
 import type { World } from '../src/seed/demo.js';
 import * as po from '../src/domain/po.js';
 import * as rcv from '../src/domain/receipt.js';
@@ -57,4 +58,40 @@ export async function runWorkedExample(w: World, onStep: (s: Step) => void): Pro
     say('sto', `Result: ${qty(row.accepted)} m accepted, ${qty(row.rejected)} m rejected, ${qty(row.reserved)} m reserved, ${qty(row.available)} m free`, true, 'Matches the blueprint example: 360 m left');
   } finally { c.release(); }
   return { lotId: lot.lotId, poId: p.id };
+}
+
+
+/** Last month's payroll, played end to end by the people involved, including the steps that must be refused. */
+export async function runPayrollExample(w: World, onStep: (s: Step) => void): Promise<{ runId: string }> {
+  const say = (who: string, text: string, ok = true, note?: string) => onStep({ who, text, ok, note });
+  const refused = async (who: string, text: string, fn: () => Promise<unknown>) => {
+    try { await fn(); say(who, text, false, 'This should have been refused'); } catch (e) { say(who, text, true, `Refused: ${(e as Error).message}`); }
+  };
+  const t = new Date();
+  const first = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() - 1, 1));
+  const period = first.toISOString().slice(0, 7);
+  const inr = (v: string) => '₹' + Number(v).toLocaleString('en-IN', { minimumFractionDigits: 2 });
+
+  const run = await w.as('hrm', (c) => hr.createPayrollRun(c, { siteId: w.siteId, period }));
+  say('hrm', `Calculates payroll for ${period} from attendance, leave and approved salaries`, true, `${run.count} people · gross ${inr(run.gross)} · net ${inr(run.net)}`);
+  await refused('hrm', 'Tries to approve the run they prepared', () => w.as('hrm', (c) => hr.approvePayrollRun(c, { runId: run.id, expectedVersion: run.version })));
+
+  const row = (await w.pool.query(`SELECT a.employee_id, a.work_date FROM attendance a JOIN employee e ON e.id = a.employee_id WHERE e.name = 'Farida Khan' AND a.work_date >= $1 AND a.status = 'P' ORDER BY a.work_date LIMIT 1`, [period + '-01'])).rows[0];
+  await w.as('hrm', (c) => hr.markAttendance(c, { employeeId: row.employee_id, date: row.work_date, status: 'A', reason: 'Gate register shows she was absent' }));
+  say('hrm', 'Corrects one attendance sheet after the draft was calculated', true, 'Farida Khan: present → absent');
+  await refused('fc', 'Tries to approve the now out-of-date draft', () => w.as('fc', async (c) => hr.approvePayrollRun(c, { runId: run.id, expectedVersion: (await c.db.query('SELECT version FROM payroll_run WHERE id=$1', [run.id])).rows[0].version })));
+  const re = await w.as('hrm', async (c) => hr.recalculatePayrollRun(c, { runId: run.id, expectedVersion: (await c.db.query('SELECT version FROM payroll_run WHERE id=$1', [run.id])).rows[0].version }));
+  say('hrm', 'Recalculates the draft from the corrected sheets', true, `net now ${inr(re.net)}`);
+  await w.as('fc', async (c) => hr.approvePayrollRun(c, { runId: run.id, expectedVersion: (await c.db.query('SELECT version FROM payroll_run WHERE id=$1', [run.id])).rows[0].version }));
+  say('fc', 'Reviews and approves it, as a different person', true, 'Attendance and payslips for the month are now locked');
+  await refused('hrm', 'Tries to change attendance in the closed month', () => w.as('hrm', (c) => hr.markAttendance(c, { employeeId: row.employee_id, date: row.work_date, status: 'P', reason: 'Changed my mind' })));
+
+  const c = await w.pool.connect();
+  try {
+    const mine = await hr.listPayslips(c as never, w.actors.emp.id);
+    const others = await hr.listPayslips(c as never, w.actors.sto.id);
+    say('emp', 'Opens their own payslip', true, `Net pay ${inr(mine[0].net)}. Sees ${mine.length} payslip, never anyone else's`);
+    say('sto', 'Looks for payslips as a storekeeper', true, `Sees ${others.length} (only their own)`);
+  } finally { c.release(); }
+  return { runId: run.id };
 }
