@@ -4,6 +4,7 @@ import * as plan from '../src/domain/planning.js';
 import { can } from '../src/core/permissions.js';
 
 const ANY = { anySite: true } as const;
+const p0 = (r: { status: string }[]) => r.filter((x) => x.status === 'open').length;
 const st = { tab: 'plan' as 'plan' | 'requests' | 'minimums', sel: '', showIdle: false, matSel: '', within: '30' };
 const rs = (n: number | null | undefined) => (n == null ? '–' : '₹' + n.toLocaleString('en-IN', { maximumFractionDigits: 0 }));
 const mlabel = (m: string) => new Date(m + 'T00:00:00').toLocaleDateString('en-IN', { month: 'short', year: '2-digit' });
@@ -18,36 +19,47 @@ export async function planningView(): Promise<Raw> {
     const fabrics = (await db.query(`SELECT id, code, name FROM item WHERE kind='FABRIC' AND status='active' ORDER BY code`)).rows as { id: string; code: string; name: string }[];
     const styles = (await db.query(`SELECT id, code, name, cutting_yield_pct::float AS y FROM product_style ORDER BY code`)).rows as { id: string; code: string; name: string; y: number }[];
     const plans = new Map<string, Record<string, unknown>>((await db.query('SELECT * FROM item_plan')).rows.map((r) => [r.item_id, r]));
-    return { p, alerts: await plan.planAlerts(db, uid()), reqs, vendors, fabrics, styles, plans, manage: await can(db, uid(), 'plan.manage', ANY), convert: await can(db, uid(), 'po.create', ANY) };
+    const cnt = async (q: string) => Number((await db.query(q)).rows[0].n);
+    const flow = { openReq: p0(reqs), pos: await cnt(`SELECT count(*)::int AS n FROM purchase_order WHERE status IN ('draft','approval_pending','approved','released','acknowledged','partial_receipt')`), qc: await cnt(`SELECT count(*)::int AS n FROM qc_inspection WHERE status IN ('pending','inspecting','submitted','held','partial')`), wo: await cnt(`SELECT count(*)::int AS n FROM work_order WHERE status IN ('draft','issued')`) };
+    return { flow, p, alerts: await plan.planAlerts(db, uid()), reqs, vendors, fabrics, styles, plans, manage: await can(db, uid(), 'plan.manage', ANY), convert: await can(db, uid(), 'po.create', ANY) };
   });
   if (!d) return denied('Production plan', 'Six months ahead: what to make and what to buy.', 'Your role cannot see the production plan.');
   const tab = (id: typeof st.tab, label: string, n?: number) => html`<button class="${st.tab === id ? 'on' : ''}" data-act="pn-tab" data-id="${id}">${label}${n ? html` <span class="grp-n">${n}</span>` : ''}</button>`;
   const open = d.reqs.filter((r: { status: string }) => r.status === 'open').length;
   const tabs = html`<div class="tabs">${tab('plan', 'Plan')}${tab('requests', 'Purchase requests', open)}${tab('minimums', 'Minimums and settings')}</div>`;
-  return html`${head('Production plan', `Next ${d.p.months.length} months from ${dateOnly(d.p.asOf)}. Pieces to make keep finished stock above its minimum; materials are bought so they never fall below theirs.`, d.manage ? html`<button class="primary" data-act="pn-run">Run the plan now</button>` : undefined)}${alertsCard(d.alerts)}${tabs}${st.tab === 'plan' ? planTab(d) : st.tab === 'requests' ? requestsTab(d) : minimumsTab(d)}`;
+  return html`${head('Production plan', `Next ${d.p.months.length} months from ${dateOnly(d.p.asOf)}. Pieces to make keep finished stock above its minimum; materials are bought so they never fall below theirs.`, d.manage ? html`<button class="primary" data-act="pn-run">Run the plan now</button>` : undefined)}${kpiStrip(d)}${flowStrip(d)}${alertsCard(d.alerts)}<div class="pn-sticky">${tabs}</div>${st.tab === 'plan' ? planTab(d) : st.tab === 'requests' ? requestsTab(d) : minimumsTab(d)}`;
 }
 const alertsCard = (a: Awaited<ReturnType<typeof plan.planAlerts>>): Raw => {
-  const n = a.skus.length + a.materials.length + a.late.length;
-  if (!n && !a.openRequests) return html`<section class="card"><p class="note">Everything is at or above its minimum, and nothing is waiting for the buyer.</p></section>`;
-  return html`<section class="card"><h2>Needs attention</h2><ul class="plain">
-    ${a.openRequests ? html`<li>${a.openRequests} purchase request${a.openRequests > 1 ? 's are' : ' is'} waiting for the buyer.</li>` : ''}
-    ${a.late.length ? html`<li class="warn-t">${a.late.length} purchase${a.late.length > 1 ? 's are' : ' is'} already late for the lead time: ${a.late.slice(0, 4).map((l) => l.code).join(', ')}${a.late.length > 4 ? '…' : ''}</li>` : ''}
-    ${a.skus.length ? html`<li>${a.skus.length} SKU${a.skus.length > 1 ? 's are' : ' is'} under the minimum with nothing being cut: ${a.skus.slice(0, 5).map((k) => k.code).join(', ')}${a.skus.length > 5 ? '…' : ''}</li>` : ''}
-    ${a.materials.length ? html`<li>${a.materials.length} material${a.materials.length > 1 ? 's are' : ' is'} under the minimum even with what is on order: ${a.materials.slice(0, 5).map((m) => m.code).join(', ')}${a.materials.length > 5 ? '…' : ''}</li>` : ''}</ul></section>`;
+  const chip = (cls: string, text: string, tip: string) => html`<span class="pn-alert ${cls}" title="${tip}">${text}</span>`;
+  const items: Raw[] = [];
+  if (a.late.length) items.push(chip('bad', `${a.late.length} late purchase${a.late.length > 1 ? 's' : ''}`, a.late.map((l) => l.code).join(', ')));
+  if (a.skus.length) items.push(chip('warn', `${a.skus.length} SKU${a.skus.length > 1 ? 's' : ''} under minimum`, a.skus.map((k) => k.code).join(', ')));
+  if (a.materials.length) items.push(chip('warn', `${a.materials.length} material${a.materials.length > 1 ? 's' : ''} under minimum`, a.materials.map((m) => m.code).join(', ')));
+  if (a.openRequests) items.push(chip('info', `${a.openRequests} request${a.openRequests > 1 ? 's' : ''} for the buyer`, 'Open purchase requests'));
+  return items.length ? html`<div class="pn-alerts"><b>Needs attention</b>${items}</div>` : html`<div class="pn-alerts ok"><b>All clear</b><span>Everything is at or above its minimum.</span></div>`;
+};
+const kpiStrip = (d: D): Raw => {
+  const t = d.p.totals; const k = (cls: string, label: string, v: string, note: string, tab: string) => html`<button class="pn-kpi ${cls}" data-act="pn-tab" data-id="${tab}"><span>${label}</span><b>${v}</b><small>${note}</small></button>`;
+  return html`<div class="pn-kpis">${k('', 'Pieces to make', t.pieces.toLocaleString('en-IN'), `next ${d.p.months.length} months`, 'plan')}${k('', 'Materials to buy', rs(t.buy_cost), `${t.buy_lines} lines`, 'plan')}${k(t.late ? 'bad' : '', 'Already late', String(t.late), t.late ? 'lead time too short' : 'none', 'plan')}${k(d.flow.openReq ? 'warn' : '', 'Requests open', String(d.flow.openReq), 'waiting for the buyer', 'requests')}</div>`;
+};
+const flowStrip = (d: D): Raw => {
+  const s = (n: number, label: string, num: number | string, note: string, act: string, id: string) => html`<button class="pn-step" data-act="${act}" data-id="${id}"><i>${n}</i><span>${label}</span><b>${num}</b><small>${note}</small></button>`;
+  return html`<div class="pn-flow" aria-label="From plan to sale">${s(1, 'Plan', d.p.totals.pieces.toLocaleString('en-IN'), 'pieces to make', 'pn-tab', 'plan')}${s(2, 'Requests', d.flow.openReq, 'open', 'pn-tab', 'requests')}${s(3, 'Orders', d.flow.pos, 'in progress', 'pn-goto', 'po')}${s(4, 'QC', d.flow.qc, 'waiting', 'pn-goto', 'quality')}${s(5, 'Work orders', d.flow.wo, 'live', 'pn-goto', 'work')}</div>`;
 };
 type D = NonNullable<Awaited<ReturnType<typeof load>>>;
-declare function load(): Promise<{ p: Awaited<ReturnType<typeof plan.computePlan>>; reqs: Awaited<ReturnType<typeof plan.listRequests>>; vendors: { id: string; code: string; name: string }[]; fabrics: { id: string; code: string; name: string }[]; styles: { id: string; code: string; name: string; y: number }[]; plans: Map<string, Record<string, unknown>>; manage: boolean; convert: boolean } | null>;
+declare function load(): Promise<{ flow: { openReq: number; pos: number; qc: number; wo: number }; alerts: Awaited<ReturnType<typeof plan.planAlerts>>; p: Awaited<ReturnType<typeof plan.computePlan>>; reqs: Awaited<ReturnType<typeof plan.listRequests>>; vendors: { id: string; code: string; name: string }[]; fabrics: { id: string; code: string; name: string }[]; styles: { id: string; code: string; name: string; y: number }[]; plans: Map<string, Record<string, unknown>>; manage: boolean; convert: boolean } | null>;
 
 function planTab(d: D): Raw {
   const p = d.p; const live = p.skus.filter((k) => st.showIdle || !k.idle);
   const sel = st.matSel ? p.materials.find((m) => m.item_id === st.matSel) : null;
-  return html`<section class="card crm-sum"><div class="crm-k"><span>Pieces to make</span><b>${p.totals.pieces.toLocaleString('en-IN')}</b></div><div class="crm-k"><span>Materials to buy</span><b>${p.totals.buy_lines} lines</b></div><div class="crm-k"><span>Estimated buying</span><b>${rs(p.totals.buy_cost)}</b></div><div class="crm-k"><span>Already late</span><b class="${p.totals.late ? 'bad-t' : ''}">${p.totals.late}</b></div></section>
+  const tot = p.months.map((_, i) => live.reduce((x, k) => x + (k.rows[i]?.production ?? 0), 0)); const maxT = Math.max(1, ...tot); const maxC = Math.max(1, ...live.flatMap((k) => k.rows.map((r) => r.production)));
+  return html`<section class="card"><h2>Pieces to make by month</h2><p class="sub">The first month is largest because it also builds up the minimum stock.</p><div class="pn-bars">${tot.map((v, i) => html`<div class="pn-bar"><b>${f(v)}</b><i style="height:${Math.round((v / maxT) * 100)}%"></i><span>${mlabel(p.months[i])}</span></div>`)}</div></section>
   ${p.warnings.length ? html`<section class="card"><ul class="plain">${p.warnings.map((w) => html`<li class="warn-t">${w}</li>`)}</ul></section>` : ''}
   <section class="card"><div class="row between"><h2>Pieces to make</h2><label class="chk"><input type="checkbox" id="pn-idle" ${st.showIdle ? raw('checked') : ''} /> show SKUs with no sales</label></div>
     <p class="sub">Each month: sales plus the minimum stock, less what is already in hand. The first month also builds up the minimum.</p>
-    ${live.length ? html`<div class="scroll"><table class="mini"><thead><tr><th>SKU</th><th class="r">In stock</th><th class="r">Sales / month</th><th class="r">Minimum</th>${p.months.map((m) => html`<th class="r">${mlabel(m)}</th>`)}<th class="r">Total</th></tr></thead><tbody>${live.map((k) => html`<tr><td class="mono">${k.code}</td><td class="r">${f(k.on_hand)}</td><td class="r">${f(k.avg_demand)}</td><td class="r">${f(k.min)}</td>${k.rows.map((r) => html`<td class="r" title="Sales ${r.demand}, opening ${r.opening}, closing ${r.closing}">${f(r.production)}</td>`)}<td class="r"><b>${f(k.pieces)}</b></td></tr>`)}</tbody></table></div>` : html`<p class="empty">No SKU has sales yet. Set expected sales on the Minimums tab, or confirm sales orders for SKUs.</p>`}</section>
+    ${live.length ? html`<div class="scroll"><table class="mini stick1"><thead><tr><th>SKU</th><th class="r">In stock</th><th class="r">Sales / month</th><th class="r">Minimum</th>${p.months.map((m) => html`<th class="r">${mlabel(m)}</th>`)}<th class="r">Total</th></tr></thead><tbody>${live.map((k) => html`<tr><td class="mono">${k.code}</td><td class="r">${f(k.on_hand)}</td><td class="r">${f(k.avg_demand)}</td><td class="r">${f(k.min)}</td>${k.rows.map((r) => html`<td class="r heat" style="--h:${Math.round((r.production / maxC) * 40)}%" title="Sales ${r.demand}, opening ${r.opening}, closing ${r.closing}">${f(r.production)}</td>`)}<td class="r"><b>${f(k.pieces)}</b></td></tr>`)}</tbody></table></div>` : html`<p class="empty">No SKU has sales yet. Set expected sales on the Minimums tab, or confirm sales orders for SKUs.</p>`}</section>
   <section class="card"><h2>Materials</h2><p class="sub">Need for the pieces above (with wastage and cutting loss), and what must be bought to stay above each minimum. Click a material for the month-by-month balance.</p>
-    ${p.materials.length ? html`<div class="scroll"><table class="mini"><thead><tr><th>Material</th><th class="r">In stock</th><th class="r">On order</th><th class="r">Minimum</th>${p.months.map((m) => html`<th class="r">${mlabel(m)}<br /><small>need / buy</small></th>`)}<th class="r">To buy</th></tr></thead><tbody>${p.materials.map((m) => html`<tr class="pick ${m.item_id === st.matSel ? 'on' : ''}" tabindex="0" data-act="pn-mat" data-id="${m.item_id}"><td><span class="mono">${m.code}</span> ${m.name}${m.make ? html`<br /><small>made from grey fabric, ${m.finish_loss_pct}% lost in finishing</small>` : ''}</td><td class="r">${f(m.on_hand)}</td><td class="r">${f(m.on_order)}</td><td class="r">${f(m.min)}</td>${m.rows.map((r) => html`<td class="r">${f(r.need)}${r.buy ? html`<br /><b class="warn-t">${f(r.buy)}</b>` : ''}</td>`)}<td class="r"><b>${f(m.buy_total)}</b> <small>${m.make ? 'to make' : m.unit}</small></td></tr>`)}</tbody></table></div>` : html`<p class="empty">Nothing to buy yet.</p>`}
+    ${p.materials.length ? html`<div class="scroll"><table class="mini stick1"><thead><tr><th>Material</th><th class="r">In stock</th><th class="r">On order</th><th class="r">Minimum</th>${p.months.map((m) => html`<th class="r">${mlabel(m)}<br /><small>need / buy</small></th>`)}<th class="r">To buy</th></tr></thead><tbody>${p.materials.map((m) => html`<tr class="pick ${m.item_id === st.matSel ? 'on' : ''}" tabindex="0" data-act="pn-mat" data-id="${m.item_id}"><td><span class="mono">${m.code}</span> ${m.name}${m.make ? html`<br /><small>made from grey fabric, ${m.finish_loss_pct}% lost in finishing</small>` : ''}</td><td class="r">${f(m.on_hand)}</td><td class="r">${f(m.on_order)}</td><td class="r">${f(m.min)}</td>${m.rows.map((r) => html`<td class="r ${r.buy ? 'buycell' : ''}">${f(r.need)}${r.buy ? html`<br /><b>buy ${f(r.buy)}</b>` : ''}</td>`)}<td class="r"><b>${f(m.buy_total)}</b> <small>${m.make ? 'to make' : m.unit}</small></td></tr>`)}</tbody></table></div>` : html`<p class="empty">Nothing to buy yet.</p>`}
     ${sel ? html`<h3>${sel.code} month by month <small>(lead time ${sel.lead_days} days${sel.vendor ? ', ' + sel.vendor : ''})</small></h3><div class="scroll"><table class="mini"><thead><tr><th></th>${p.months.map((m) => html`<th class="r">${mlabel(m)}</th>`)}</tr></thead><tbody>
       ${(['opening', 'receipts', 'need', 'buy', 'closing'] as const).map((k) => html`<tr><td>${{ opening: 'Opening stock', receipts: 'Arriving (orders and requests)', need: 'Needed for production', buy: sel.make ? 'To make' : 'To buy', closing: 'Closing stock' }[k]}</td>${sel.rows.map((r) => html`<td class="r">${f(r[k])}</td>`)}</tr>`)}</tbody></table></div>` : ''}</section>`;
 }
@@ -106,6 +118,7 @@ export async function onClick(t: HTMLElement): Promise<boolean> {
       if (r) { toast(`${r.requests.length} purchase request${r.requests.length === 1 ? '' : 's'} raised, ${r.cutting.length} cutting order${r.cutting.length === 1 ? '' : 's'} drafted${r.cutting.length ? '. Find them under Work orders' : ''}`); await R.render(); }
       return true;
     }
+    case 'pn-goto': S.view = id as typeof S.view; history.replaceState(null, '', '#' + id); return done();
     case 'pn-openpo': S.poId = id; S.view = 'po'; history.replaceState(null, '', '#po'); return done();
     case 'pn-gen': {
       const w = Number(val('pn-within') || st.within); st.within = String(w);
