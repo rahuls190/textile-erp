@@ -20,7 +20,20 @@ const SECTION_LABEL: Record<string, string> = { FABRIC: 'Fabric', TRIM: 'Trims',
 const BOM_TONE: Record<string, string> = { draft: 'neutral', submitted: 'warn', active: 'ok', superseded: 'neutral' };
 const bChip = (s: string) => html`<span class="chip ${BOM_TONE[s] ?? 'neutral'}">${s === 'submitted' ? 'waiting for approval' : s === 'active' ? 'in use' : s}</span>`;
 const parseSizes = (s: string) => s.split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
-const parseColours = (s: string) => s.split(/[,\n]/).map((x) => x.trim()).filter(Boolean).map((x) => { const [c, ...n] = x.split(/[:=-]/); return { code: c.trim().toUpperCase(), name: (n.join(' ').trim() || c.trim()) }; });
+/** "BLK:Black", "BLK=Black", "BLK - Black", or just "Navy blue" (the code is then made from the name). */
+const parseColours = (s: string) => {
+  const used = new Set<string>();
+  return s.split(/[,\n]/).map((x) => x.trim()).filter(Boolean).map((x) => {
+    let code: string; let name: string;
+    const m = x.match(/^([^:=]+?)\s*[:=]\s*(.+)$/) ?? x.match(/^(\S+)\s+-\s+(.+)$/);
+    if (m) { code = m[1].trim(); name = m[2].trim(); }
+    else { name = x; code = x.replace(/[^A-Za-z0-9]/g, '').slice(0, 3); }
+    code = code.toUpperCase().replace(/\s+/g, '-');
+    let c = code, n = 2; while (used.has(c)) c = code + n++;
+    used.add(c); return { code: c, name };
+  });
+};
+const styleCode = (s: string) => s.trim().toUpperCase().replace(/[\s_]+/g, '-');
 
 // ───────────── reading the editor back from the page ─────────────
 function syncLines() {
@@ -264,7 +277,7 @@ async function calc(plan: { skuId: string; qty: number }[]) {
 export async function onSubmit(form: string, f?: HTMLElement): Promise<boolean> {
   if (!form.startsWith('bm-')) return false;
   if (form === 'bm-newstyle') {
-    const r = await act('Style saved. Now create its SKUs', (c) => bom.createStyle(c, { code: val('ns-code'), name: val('ns-name'), category: val('ns-cat') || undefined, hsnCode: val('ns-hsn') || undefined, gstRate: val('ns-gst') || undefined, sizes: parseSizes(val('ns-sizes')), colours: parseColours(val('ns-cols')) }));
+    const r = await act('Style saved. Now create its SKUs', (c) => bom.createStyle(c, { code: styleCode(val('ns-code')), name: val('ns-name'), category: val('ns-cat') || undefined, hsnCode: val('ns-hsn') || undefined, gstRate: val('ns-gst') || undefined, sizes: parseSizes(val('ns-sizes')), colours: parseColours(val('ns-cols')) }));
     if (r) { st.newStyle = false; st.styleId = r.id; st.draft = {}; fresh(); await R.render(); }
     else for (const k of ['ns-code', 'ns-name', 'ns-cat', 'ns-hsn', 'ns-gst', 'ns-sizes', 'ns-cols']) st.draft[k] = val(k);
     return true;
