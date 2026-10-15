@@ -13,6 +13,7 @@ import * as barcode from './domain/barcode.js';
 import * as bcs from './domain/barcodes.js';
 import * as bom from './domain/bom.js';
 import * as bulk from './domain/bulk.js';
+import * as plan from './domain/planning.js';
 import * as sales from './domain/sales.js';
 import * as prefs from './domain/prefs.js';
 import * as admin from './domain/admin.js';
@@ -278,6 +279,17 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
     if (h === 'materials' || h === 'finished') return mdata.importMaterials(c, b.csv, !!b.dryRun, h === 'finished' ? 'fg' : 'materials');
     return mdata.importParties(c, b.csv, !!b.dryRun, h === 'vendors' ? 'vendor' : h === 'distributors' ? 'distributor' : 'retailer');
   });
+
+  // ── production planning ──
+  app.get('/api/plan', read((db, a) => plan.computePlan(db, a.id)));
+  app.get('/api/plan/requests', read((db, a) => plan.listRequests(db, a.id)));
+  cmd('/api/plan/settings', 'plan.settings', z.object({ salesMonths: z.number().int().optional(), coverDays: z.number().int().optional(), leadDays: z.number().int().optional(), horizonMonths: z.number().int().optional() }), (c, b) => plan.updateSettings(c, b));
+  cmd('/api/plan/items/:id', 'plan.item', z.object({ manualMin: z.string().nullish(), coverDays: z.number().int().nullish(), leadDays: z.number().int().nullish(), monthlyDemand: z.string().nullish(), preferredVendorId: id.nullish(), greyItemId: id.nullish(), finishLossPct: z.string().nullish() }), (c, b, p) => plan.setItemPlan(c, { itemId: p.id, ...b }));
+  cmd('/api/plan/demand', 'plan.demand', z.object({ itemId: id, month: z.string(), qty: z.string().nullable(), note: z.string().optional() }), (c, b) => plan.setDemand(c, b));
+  cmd('/api/plan/yield', 'plan.yield', z.object({ styleId: id, yieldPct: z.number() }), (c, b) => plan.setCuttingYield(c, b));
+  cmd('/api/plan/requests/generate', 'request.create', z.object({ withinDays: z.number().int().optional() }), (c, b) => plan.generateRequests(c, b), true);
+  cmd('/api/plan/requests/:id/convert', 'request.convert', z.object({ expectedVersion: ver, partnerId: id.optional() }), (c, b, p) => plan.convertRequest(c, { requestId: p.id, ...b }), true);
+  cmd('/api/plan/requests/:id/cancel', 'request.cancel', z.object({ expectedVersion: ver, reason: z.string().min(3) }), (c, b, p) => plan.cancelRequest(c, { requestId: p.id, ...b }));
 
   // ── purchase orders ──
   const poLine = z.object({ itemId: id, qty: pos, rate: pos.optional(), dueDate: date.nullish() });

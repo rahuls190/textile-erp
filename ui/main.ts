@@ -25,6 +25,7 @@ import * as SL from './views-sales.js';
 import * as MX from './views-masters.js';
 import * as BM from './views-bom.js';
 import * as BK from './views-bulk.js';
+import * as PN from './views-plan.js';
 import * as AI from './views-ai.js';
 import * as AG from './agent-ui.js';
 import * as P0 from '../src/domain/reports.js';
@@ -32,7 +33,7 @@ import * as P0 from '../src/domain/reports.js';
 declare const __BUILD_ID__: string;
 
 type Item = { id: View; label: string; hint: string };
-const GROUPS: { title: string; key: 'control' | 'reports' | 'sales' | 'masters' | 'products' | 'ops' | 'people' | 'admin'; items: Item[] }[] = [
+const GROUPS: { title: string; key: 'control' | 'reports' | 'sales' | 'masters' | 'products' | 'planning' | 'ops' | 'people' | 'admin'; items: Item[] }[] = [
   { title: 'Control', key: 'control', items: [
     { id: 'owner', label: 'Owner desk', hint: 'Every process on one page' },
     { id: 'escalations', label: 'Urgent approvals', hint: 'Escalate and follow' } ] },
@@ -52,6 +53,8 @@ const GROUPS: { title: string; key: 'control' | 'reports' | 'sales' | 'masters' 
     { id: 'mtypes', label: 'Material types', hint: 'What each kind must record, units' } ] },
   { title: 'Products', key: 'products', items: [
     { id: 'products', label: 'Styles, SKUs & BOM', hint: 'Sizes, colours, bills of materials, packs' } ] },
+  { title: 'Planning', key: 'planning', items: [
+    { id: 'planning', label: 'Production plan', hint: 'Six months ahead, minimum stock, purchase requests' } ] },
   { title: 'Operations', key: 'ops', items: [
     { id: 'po', label: 'Purchase orders', hint: 'Create, approve, release' },
     { id: 'receiving', label: 'Receiving', hint: 'Material arriving at the gate' },
@@ -72,7 +75,7 @@ const GROUPS: { title: string; key: 'control' | 'reports' | 'sales' | 'masters' 
 ];
 const ALL_VIEWS: View[] = ['overview', 'account', ...GROUPS.flatMap((g) => g.items.map((i) => i.id))];
 
-let vis = { ops: true, users: false, audit: false, owner: false, esc: false, rep: false, masters: false, ai: false, mat: false, ven: false, cli: false, sales: false, prod: false, crm: false, quotes: false, sord: false };
+let vis = { ops: true, users: false, audit: false, owner: false, esc: false, rep: false, masters: false, ai: false, mat: false, ven: false, cli: false, sales: false, prod: false, plan: false, crm: false, quotes: false, sord: false };
 const rollBar = (r: { held: string; accepted: string; rejected: string; reserved: string; available: string }) => {
   const held = Number(r.held), rej = Number(r.rejected), res = Number(r.reserved), av = Math.max(Number(r.available), 0);
   const tot = held + rej + res + av || 1;
@@ -278,7 +281,7 @@ function shell(content: Raw): string {
     <div class="workspace"><b>Kalyani Plant 1</b><small>Demo data, this browser only</small></div>
     <div class="nav-scroll"><nav class="side" aria-label="Sections">
       <a href="#overview" class="${S.view === 'overview' ? 'on' : ''}" data-view="overview">${icon('overview')}Overview</a>
-      ${GROUPS.filter((g) => (g.key !== 'ops' || vis.ops) && (g.key !== 'control' || vis.owner || vis.esc) && (g.key !== 'reports' || vis.rep) && (g.key !== 'sales' || vis.sales) && (g.key !== 'masters' || vis.masters) && (g.key !== 'products' || vis.prod)).map((g) => { const its = items(g); const has = its.some((n) => n.id === S.view); if (has) navOpen.add(g.key); const o = navOpen.has(g.key); return html`<button type="button" class="grp ${o ? 'open' : ''} ${has ? 'cur' : ''}" data-grp="${g.key}" aria-expanded="${o}">${g.title}<span class="grp-n">${its.length}</span>${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>')}</button><div class="grp-items ${o ? '' : 'shut'}" data-items="${g.key}">${its.map((n) => html`<a href="#${n.id}" class="${n.id === S.view ? 'on' : ''}" data-view="${n.id}" title="${n.hint}">${icon(n.id)}${n.label}</a>`)}</div>`; })}
+      ${GROUPS.filter((g) => (g.key !== 'ops' || vis.ops) && (g.key !== 'control' || vis.owner || vis.esc) && (g.key !== 'reports' || vis.rep) && (g.key !== 'sales' || vis.sales) && (g.key !== 'masters' || vis.masters) && (g.key !== 'products' || vis.prod) && (g.key !== 'planning' || vis.plan)).map((g) => { const its = items(g); const has = its.some((n) => n.id === S.view); if (has) navOpen.add(g.key); const o = navOpen.has(g.key); return html`<button type="button" class="grp ${o ? 'open' : ''} ${has ? 'cur' : ''}" data-grp="${g.key}" aria-expanded="${o}">${g.title}<span class="grp-n">${its.length}</span>${raw('<svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>')}</button><div class="grp-items ${o ? '' : 'shut'}" data-items="${g.key}">${its.map((n) => html`<a href="#${n.id}" class="${n.id === S.view ? 'on' : ''}" data-view="${n.id}" title="${n.hint}">${icon(n.id)}${n.label}</a>`)}</div>`; })}
     </nav></div>
     <div class="side-bottom"><button class="ghost reset" data-act="reset">Reset demo data</button></div>
   </aside>
@@ -328,6 +331,7 @@ async function computeVis() {
     ven: await can(db, uid(), 'partner.view', { anySite: true }),
     cli: await can(db, uid(), 'partner.view', { anySite: true }) || await can(db, uid(), 'so.view', { anySite: true }),
     prod: await can(db, uid(), 'bom.view', { anySite: true }),
+    plan: await can(db, uid(), 'plan.view', { anySite: true }),
     masters: (await Promise.all(['item.view', 'partner.view', 'so.view'].map((p) => can(db, uid(), p, { anySite: true })))).some(Boolean),
     rep: (await P0.listReports(db, uid())).length > 0,
     esc: await can(db, uid(), 'escalation.view', { anySite: true }) || await can(db, uid(), 'owner.view', { anySite: true }),
@@ -337,7 +341,7 @@ async function computeVis() {
 const VIEWS: Record<View, () => Promise<Raw>> = {
   overview, po: poView, receiving: receivingView, quality: qualityView, stock: stockView, audit: auditView,
   employees: H.employeesView, attendance: H.attendanceView, leave: H.leaveView, payroll: H.payrollView,
-  owner: O.ownerView, escalations: O.escalationsView, reports: P.reportsView, barcodes: B.barcodesView, crm: SL.crmView, quotes: SL.quotesView, sales: SL.salesView, materials: MX.materialsView, mtypes: MX.typesView, vendors: MX.vendorsView, distributors: MX.distributorsView, retailers: MX.retailersView, finished: MX.finishedView, skus: BK.skusView, clients: MX.retailersView, products: BM.productsView, aimodels: AI.aiView, users: A.usersView, roles: A.rolesView, signins: A.signinsView, account: A.accountView,
+  owner: O.ownerView, escalations: O.escalationsView, reports: P.reportsView, barcodes: B.barcodesView, crm: SL.crmView, quotes: SL.quotesView, sales: SL.salesView, materials: MX.materialsView, mtypes: MX.typesView, vendors: MX.vendorsView, distributors: MX.distributorsView, retailers: MX.retailersView, finished: MX.finishedView, skus: BK.skusView, clients: MX.retailersView, products: BM.productsView, planning: PN.planningView, aimodels: AI.aiView, users: A.usersView, roles: A.rolesView, signins: A.signinsView, account: A.accountView,
 };
 
 let queued = false;
@@ -401,6 +405,7 @@ document.addEventListener('click', async (ev) => {
   if (await MX.onClick(t)) return;
   if (await BM.onClick(t)) return;
   if (await BK.onClick(t)) return;
+  if (await PN.onClick(t)) return;
   if (await AI.onClick(t)) return;
   if (await PF.onClick(t, async () => (await read((db) => db.query(`SELECT id, code, name, stock_unit FROM item WHERE status='active' ORDER BY code`))).rows as never)) return;
   const pp = t.closest('[data-pick-po]') as HTMLElement | null; if (pp) { S.poId = pp.dataset.pickPo!; return render(); }
@@ -453,6 +458,7 @@ document.addEventListener('submit', async (ev) => {
   if (await SL.onSubmit(f.dataset.form!, f)) return;
   if (await BM.onSubmit(f.dataset.form!, f)) return;
   if (await BK.onSubmit(f.dataset.form!, f, ev as SubmitEvent)) return;
+  if (await PN.onSubmit(f.dataset.form!)) return;
   if (await MX.onSubmit(f.dataset.form!, f, ev as SubmitEvent)) return;
   if (await AI.onSubmit(f.dataset.form!, f)) return;
   switch (f.dataset.form) {
@@ -486,6 +492,7 @@ document.addEventListener('change', async (ev) => {
   if (await MX.onChange(t)) return;
   if (await BM.onChange(t)) return;
   if (await BK.onChange(t)) return;
+  if (await PN.onChange(t)) return;
   if (await AI.onChange(t)) return;
   if (t.dataset.perm) return A.togglePerm(t.dataset.perm);
   if (t.id === 'att-date' && t.value) { S.attDate = t.value; return render(); }

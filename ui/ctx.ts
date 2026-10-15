@@ -11,7 +11,7 @@ export const DEMO_PASSWORD = 'Demo-Passw0rd!';
 export type View =
   | 'overview' | 'po' | 'receiving' | 'quality' | 'stock'
   | 'employees' | 'attendance' | 'leave' | 'payroll'
-  | 'users' | 'roles' | 'audit' | 'signins' | 'account' | 'owner' | 'escalations' | 'reports' | 'barcodes' | 'crm' | 'quotes' | 'sales' | 'materials' | 'mtypes' | 'vendors' | 'clients' | 'distributors' | 'retailers' | 'finished' | 'skus' | 'aimodels' | 'products';
+  | 'users' | 'roles' | 'audit' | 'signins' | 'account' | 'owner' | 'escalations' | 'reports' | 'barcodes' | 'crm' | 'quotes' | 'sales' | 'materials' | 'mtypes' | 'vendors' | 'clients' | 'distributors' | 'retailers' | 'finished' | 'skus' | 'aimodels' | 'products' | 'planning';
 
 export const K = { world: null as unknown as World, pool: null as unknown as LitePool };
 export const R = { render: async () => {}, scheduleRender: () => {} };
@@ -78,12 +78,13 @@ export const PEOPLE: Record<string, { name: string; role: string }> = {
   hre: { name: 'Rohan Das', role: 'HR executive' },
   sup: { name: 'Ganesh Patil', role: 'Line supervisor' },
   emp: { name: 'Sunita Kamble', role: 'Machine operator (no system role)' },
+  pln: { name: 'Sanjay Kulkarni', role: 'Production planner' },
   sal: { name: 'Priya Menon', role: 'Sales executive' },
   slm: { name: 'Rohit Verma', role: 'Sales manager · limit ₹10,00,000' },
   own: { name: 'Business owner', role: 'Owner · sees everything, can override approvals' },
   admin: { name: 'System admin', role: 'Administrator (no business approvals)' },
 };
-export const ORDER = ['own', 'slm', 'sal', 'admin', 'hrm', 'hre', 'sup', 'emp', 'buy', 'com', 'sto', 'qci', 'qcm', 'inv', 'md', 'eng', 'fc', 'aud'];
+export const ORDER = ['own', 'slm', 'sal', 'admin', 'hrm', 'hre', 'sup', 'emp', 'buy', 'com', 'sto', 'qci', 'qcm', 'inv', 'md', 'eng', 'pln', 'fc', 'aud'];
 
 /** The demo clock: real time plus any hours the owner has fast-forwarded. */
 export const demoNow = () => new Date(Date.now() + S.skewHours * 3600000);

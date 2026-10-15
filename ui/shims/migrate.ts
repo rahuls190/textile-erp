@@ -8,6 +8,7 @@ import addrSql from '../../src/db/migrations/009_addresses.sql';
 import bcSql from '../../src/db/migrations/010_barcodes.sql';
 import bomSql from '../../src/db/migrations/011_bom.sql';
 import ptSql from '../../src/db/migrations/012_party_types.sql';
+import planSql from '../../src/db/migrations/013_planning.sql';
 import aiSql from '../../src/db/migrations/008_ai_models.sql';
 import prefsSql from '../../src/db/migrations/003_preferences.sql';
 export async function migrate(pool: { query(t: string): Promise<unknown> }): Promise<string[]> {
@@ -23,5 +24,6 @@ export async function migrate(pool: { query(t: string): Promise<unknown> }): Pro
   await pool.query(bcSql as string);
   await pool.query(bomSql as string);
   await pool.query(ptSql as string);
-  return ['001_init.sql', '002_admin_hr.sql', '003_preferences.sql', '004_owner_escalation.sql', '005_custom_reports.sql', '006_crm_sales.sql', '007_masters.sql', '008_ai_models.sql', '009_addresses.sql', '010_barcodes.sql', '011_bom.sql', '012_party_types.sql'];
+  await pool.query(planSql as string);
+  return ['001_init.sql', '002_admin_hr.sql', '003_preferences.sql', '004_owner_escalation.sql', '005_custom_reports.sql', '006_crm_sales.sql', '007_masters.sql', '008_ai_models.sql', '009_addresses.sql', '010_barcodes.sql', '011_bom.sql', '012_party_types.sql', '013_planning.sql'];
 }
