@@ -1,6 +1,7 @@
 import type { World } from './demo.js';
 import * as masters from '../domain/masters.js';
 import * as md from '../domain/master-data.js';
+import * as bom from '../domain/bom.js';
 
 const A = md.parseAttrs;
 export const TYPES: { code: string; name: string; kind: string; unit: string; tracking: string; prefix: string; attrs: string }[] = [
@@ -36,15 +37,17 @@ export async function seedMastersDemo(w: World, withSales: boolean) {
     return it.id as string;
   };
   const wv = await mat('WOVEN', 'Poplin 120 GSM, white', { hsnCode: '5208', gstRate: '5', reorderLevel: '300', attributes: { width: 112, gsm: 120, weave: 'Plain' } });
-  await mat('KNIT', 'Rib knit 220 GSM, black', { hsnCode: '6006', gstRate: '5', reorderLevel: '400', attributes: { width: 150, gsm: 220, composition: '96% cotton, 4% lycra' } });
-  await mat('ELASTIC', 'Picot elastic 8mm, skin', { hsnCode: '5806', gstRate: '12', reorderLevel: '800', attributes: { width: 8, colour: 'Skin' } });
-  await mat('THREAD', 'Polyester thread 40/2, white', { hsnCode: '5401', gstRate: '12', reorderLevel: '20', attributes: { count: '40/2', colour: 'White' } });
+  const rib = await mat('KNIT', 'Rib knit 220 GSM, black', { hsnCode: '6006', gstRate: '5', reorderLevel: '400', attributes: { width: 150, gsm: 220, composition: '96% cotton, 4% lycra' } });
+  const picot = await mat('ELASTIC', 'Picot elastic 8mm, skin', { hsnCode: '5806', gstRate: '12', reorderLevel: '800', attributes: { width: 8, colour: 'Skin' } });
+  const thr = await mat('THREAD', 'Polyester thread 40/2, white', { hsnCode: '5401', gstRate: '12', reorderLevel: '20', attributes: { count: '40/2', colour: 'White' } });
   await mat('HARDWARE', 'Bra hook and eye, 3 row', { hsnCode: '9606', gstRate: '12', reorderLevel: '5000', attributes: { size: '3x2', finish: 'Nickel free' } });
   const cup = await mat('CUP', 'Moulded cup B', { hsnCode: '6212', gstRate: '12', reorderLevel: '2000', attributes: { cupSize: 'B', moulding: 'Seamless' } });
-  await mat('LABEL', 'Woven brand label', { hsnCode: '5807', gstRate: '12', reorderLevel: '10000' });
-  await mat('CARTON', 'Export carton 60x40x40', { hsnCode: '4819', gstRate: '12', reorderLevel: '200', attributes: { size: '60x40x40 cm' } });
+  const lbl = await mat('LABEL', 'Woven brand label', { hsnCode: '5807', gstRate: '12', reorderLevel: '10000' });
+  const ctn = await mat('CARTON', 'Export carton 60x40x40', { hsnCode: '4819', gstRate: '12', reorderLevel: '200', attributes: { size: '60x40x40 cm' } });
   await mat('GARMENT', 'Basic tee, white, M', { hsnCode: '6109', gstRate: '5', attributes: { size: 'M', colour: 'White' } });
   await mat('KNIT', 'Single jersey 150 GSM, navy', { hsnCode: '6006', gstRate: '5', attributes: { width: 160, gsm: 150 } }, false); // still a draft
+
+  const wbox = await mat('CARTON', 'Retail box 3-pack', { hsnCode: '4819', gstRate: '12', reorderLevel: '300', attributes: { size: '22x16x6 cm' } });
 
   // Vendors: created by the buyer, bank verified by finance, approved by commercial
   const vend = async (name: string, gstin: string, o: md.PartnerProfile & { contact: { name: string; phone: string; role: string }; line: string; pin: string }, ready = true) => {
@@ -88,4 +91,20 @@ export async function seedMastersDemo(w: World, withSales: boolean) {
     const m = await w.as('sal', (c) => md.createParty(c, { name: 'Metro Innerwear', role: 'customer', gstin: '29AAACM5566E1Z9', pan: 'AAACM5566E', city: 'Bengaluru', state: 'Karnataka', phone: '9900112233', email: 'anil@metroinnerwear.example', contact: { name: 'Anil Kumar', phone: '9900112233', role: 'Owner' }, billing: { label: 'Office', line1: '45, Brigade Road', city: 'Bengaluru', state: 'Karnataka', pincode: '560001' }, shippingSameAsBilling: true }));
     await w.as('sal', (c) => masters.submitPartner(c, { partnerId: m.id, expectedVersion: 1 })); // waiting for commercial approval
   }
+  // A style with sizes and colours, its SKUs, an approved BOM and a 3-pack box.
+  const st = await w.as('md', (c) => bom.createStyle(c, { code: 'BRF-01', name: 'Classic brief', category: 'Innerwear', hsnCode: '6107', gstRate: '5', sizes: ['S', 'M', 'L', 'XL'], colours: [{ code: 'BLK', name: 'Black' }, { code: 'WHT', name: 'White' }, { code: 'NVY', name: 'Navy' }] }));
+  await w.as('md', (c) => bom.createSkus(c, { styleId: st.id }));
+  const b = await w.as('md', (c) => bom.startBom(c, { styleId: st.id }));
+  const saved = await w.as('md', (c) => bom.saveBomLines(c, { bomId: b.id, expectedRev: b.rev, notes: 'First costed BOM', lines: [
+    { section: 'FABRIC', itemId: rib, qty: '0.2200', wastagePct: '6', qtyBySize: { S: '0.1900', M: '0.2100', L: '0.2400', XL: '0.2700' }, note: 'Body, cut width 150 cm' },
+    { section: 'TRIM', itemId: picot, qty: '0.8000', wastagePct: '3', qtyBySize: { S: '0.7000', M: '0.7600', L: '0.8400', XL: '0.9000' }, note: 'Waist and leg' },
+    { section: 'TRIM', itemId: thr, qty: '0.0030', wastagePct: '5' },
+    { section: 'PACKING', itemId: lbl, qty: '1', note: 'Brand label' },
+  ] }));
+  await w.as('md', (c) => bom.submitBom(c, { bomId: b.id, expectedRev: saved.rev }));
+  const sub = (await w.pool.query('SELECT rev FROM bom WHERE id=$1', [b.id])).rows[0].rev;
+  await w.as('eng', (c) => bom.approveBom(c, { bomId: b.id, expectedRev: sub }));
+  const sk = Object.fromEntries((await w.pool.query('SELECT code, id FROM sku WHERE style_id=$1', [st.id])).rows.map((x) => [x.code, x.id]));
+  await w.as('md', (c) => bom.createPack(c, { code: 'BRF-01-3PK-M', name: 'Classic brief 3-pack, size M (black, white, navy)', skus: [{ skuId: sk['BRF-01-BLK-M'], qty: 1 }, { skuId: sk['BRF-01-WHT-M'], qty: 1 }, { skuId: sk['BRF-01-NVY-M'], qty: 1 }], materials: [{ itemId: wbox, qty: '1' }] }));
+
 }

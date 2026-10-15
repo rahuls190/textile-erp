@@ -11,6 +11,7 @@ import * as custom from './domain/custom-reports.js';
 import * as ai from './domain/ai.js';
 import * as barcode from './domain/barcode.js';
 import * as bcs from './domain/barcodes.js';
+import * as bom from './domain/bom.js';
 import * as sales from './domain/sales.js';
 import * as prefs from './domain/prefs.js';
 import * as admin from './domain/admin.js';
@@ -243,6 +244,29 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
   cmd('/api/partners/:id/approve', 'partner.approve', ev, (c, b, p) => masters.approvePartner(c, { partnerId: p.id, expectedVersion: b.expectedVersion }));
   cmd('/api/rates', 'rate.propose', z.object({ partnerId: id, itemId: id, rate: pos, effectiveFrom: date, minQty: pos.optional() }), (c, b) => masters.proposeRate(c, b), true);
   cmd('/api/rates/:id/approve', 'rate.approve', none, (c, _b, p) => masters.approveRate(c, { rateId: p.id }));
+
+  // ── products, BOMs and packs ──
+  const colour = z.object({ code: z.string(), name: z.string() });
+  const bomLine = z.object({ section: z.enum(bom.SECTIONS), itemId: id, qty: z.string(), wastagePct: z.string().optional(), sizes: z.array(z.string()).nullish(), colours: z.array(z.string()).nullish(), qtyBySize: z.record(z.string(), z.string()).optional(), note: z.string().optional() });
+  const rev = z.object({ expectedRev: z.number().int() });
+  app.get('/api/styles', read((db, a) => bom.listStyles(db, a.id)));
+  app.get('/api/styles/:id', read((db, a, r) => bom.getStyle(db, a.id, (r.params as { id: string }).id)));
+  app.get('/api/boms/:id', read((db, a, r) => bom.getBom(db, a.id, (r.params as { id: string }).id)));
+  app.get('/api/boms/:id/overview', read((db, a, r) => bom.bomOverview(db, a.id, (r.params as { id: string }).id)));
+  app.get('/api/boms/:id/sku/:skuId', read((db, a, r) => { const p = r.params as { id: string; skuId: string }; return bom.skuBom(db, a.id, { bomId: p.id, skuId: p.skuId }); }));
+  app.post('/api/boms/:id/requirements', read((db, a, r) => bom.requirements(db, a.id, { bomId: (r.params as { id: string }).id, plan: z.object({ plan: z.array(z.object({ skuId: id, qty: z.number().int().min(0) })).max(400) }).parse(r.body ?? {}).plan })));
+  app.get('/api/packs', read((db, a) => bom.listPacks(db, a.id)));
+  cmd('/api/styles', 'style.create', z.object({ code: z.string(), name: z.string(), category: z.string().optional(), description: z.string().optional(), hsnCode: z.string().optional(), gstRate: z.string().optional(), sizes: z.array(z.string()), colours: z.array(colour) }), (c, b) => bom.createStyle(c, b), true);
+  cmd('/api/styles/:id/edit', 'style.update', z.object({ expectedVersion: ver, name: z.string().optional(), category: z.string().optional(), description: z.string().optional(), sizes: z.array(z.string()).optional(), colours: z.array(colour).optional() }), (c, b, p) => bom.updateStyle(c, { styleId: p.id, ...b }));
+  cmd('/api/styles/:id/skus', 'style.skus', z.object({ combos: z.array(z.object({ size: z.string(), colour: z.string() })).optional() }), (c, b, p) => bom.createSkus(c, { styleId: p.id, combos: b.combos }));
+  cmd('/api/styles/:id/bom', 'bom.start', z.object({ copyFromBomId: id.optional() }), (c, b, p) => bom.startBom(c, { styleId: p.id, copyFromBomId: b.copyFromBomId }), true);
+  cmd('/api/boms/:id/lines', 'bom.save', rev.extend({ lines: z.array(bomLine).max(200), notes: z.string().optional() }), (c, b, p) => bom.saveBomLines(c, { bomId: p.id, ...b }));
+  cmd('/api/boms/:id/submit', 'bom.submit', rev, (c, b, p) => bom.submitBom(c, { bomId: p.id, expectedRev: b.expectedRev }));
+  cmd('/api/boms/:id/return', 'bom.return', rev.extend({ reason: z.string().min(3) }), (c, b, p) => bom.returnBom(c, { bomId: p.id, ...b }));
+  cmd('/api/boms/:id/approve', 'bom.approve', rev, (c, b, p) => bom.approveBom(c, { bomId: p.id, expectedRev: b.expectedRev }));
+  cmd('/api/boms/:id/discard', 'bom.discard', rev, (c, b, p) => bom.discardBom(c, { bomId: p.id, expectedRev: b.expectedRev }));
+  cmd('/api/packs', 'pack.create', z.object({ code: z.string(), name: z.string(), notes: z.string().optional(), skus: z.array(z.object({ skuId: id, qty: z.number().int() })).min(1), materials: z.array(z.object({ itemId: id, qty: z.string() })).optional() }), (c, b) => bom.createPack(c, b), true);
+  cmd('/api/packs/:id/status', 'pack.status', z.object({ status: z.enum(['active', 'inactive']) }), (c, b, p) => bom.setPackStatus(c, { packId: p.id, status: b.status }));
 
   // ── purchase orders ──
   const poLine = z.object({ itemId: id, qty: pos, rate: pos.optional(), dueDate: date.nullish() });
