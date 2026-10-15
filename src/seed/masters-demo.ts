@@ -75,6 +75,7 @@ export async function seedMastersDemo(w: World, withSales: boolean) {
   await rate(v1, wv, '118.0000');
   await rate(v2, w.items.trim, '4.2000');
   await rate(v3, cup, '9.5000');
+  await rate(v1, rib, '165.0000'); await rate(v2, picot, '3.1000'); await rate(v1, thr, '950.0000'); await rate(v2, lbl, '0.6000');
 
   // Clients. C-001 and C-002 exist when the sales demo ran.
   if (withSales) {
