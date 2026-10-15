@@ -18,14 +18,23 @@ export async function planningView(): Promise<Raw> {
     const fabrics = (await db.query(`SELECT id, code, name FROM item WHERE kind='FABRIC' AND status='active' ORDER BY code`)).rows as { id: string; code: string; name: string }[];
     const styles = (await db.query(`SELECT id, code, name, cutting_yield_pct::float AS y FROM product_style ORDER BY code`)).rows as { id: string; code: string; name: string; y: number }[];
     const plans = new Map<string, Record<string, unknown>>((await db.query('SELECT * FROM item_plan')).rows.map((r) => [r.item_id, r]));
-    return { p, reqs, vendors, fabrics, styles, plans, manage: await can(db, uid(), 'plan.manage', ANY), convert: await can(db, uid(), 'po.create', ANY) };
+    return { p, alerts: await plan.planAlerts(db, uid()), reqs, vendors, fabrics, styles, plans, manage: await can(db, uid(), 'plan.manage', ANY), convert: await can(db, uid(), 'po.create', ANY) };
   });
   if (!d) return denied('Production plan', 'Six months ahead: what to make and what to buy.', 'Your role cannot see the production plan.');
   const tab = (id: typeof st.tab, label: string, n?: number) => html`<button class="${st.tab === id ? 'on' : ''}" data-act="pn-tab" data-id="${id}">${label}${n ? html` <span class="grp-n">${n}</span>` : ''}</button>`;
   const open = d.reqs.filter((r: { status: string }) => r.status === 'open').length;
   const tabs = html`<div class="tabs">${tab('plan', 'Plan')}${tab('requests', 'Purchase requests', open)}${tab('minimums', 'Minimums and settings')}</div>`;
-  return html`${head('Production plan', `Next ${d.p.months.length} months from ${dateOnly(d.p.asOf)}. Pieces to make keep finished stock above its minimum; materials are bought so they never fall below theirs.`, d.manage ? html`<button class="primary" data-act="pn-gen">Raise purchase requests now</button>` : undefined)}${tabs}${st.tab === 'plan' ? planTab(d) : st.tab === 'requests' ? requestsTab(d) : minimumsTab(d)}`;
+  return html`${head('Production plan', `Next ${d.p.months.length} months from ${dateOnly(d.p.asOf)}. Pieces to make keep finished stock above its minimum; materials are bought so they never fall below theirs.`, d.manage ? html`<button class="primary" data-act="pn-run">Run the plan now</button>` : undefined)}${alertsCard(d.alerts)}${tabs}${st.tab === 'plan' ? planTab(d) : st.tab === 'requests' ? requestsTab(d) : minimumsTab(d)}`;
 }
+const alertsCard = (a: Awaited<ReturnType<typeof plan.planAlerts>>): Raw => {
+  const n = a.skus.length + a.materials.length + a.late.length;
+  if (!n && !a.openRequests) return html`<section class="card"><p class="note">Everything is at or above its minimum, and nothing is waiting for the buyer.</p></section>`;
+  return html`<section class="card"><h2>Needs attention</h2><ul class="plain">
+    ${a.openRequests ? html`<li>${a.openRequests} purchase request${a.openRequests > 1 ? 's are' : ' is'} waiting for the buyer.</li>` : ''}
+    ${a.late.length ? html`<li class="warn-t">${a.late.length} purchase${a.late.length > 1 ? 's are' : ' is'} already late for the lead time: ${a.late.slice(0, 4).map((l) => l.code).join(', ')}${a.late.length > 4 ? '…' : ''}</li>` : ''}
+    ${a.skus.length ? html`<li>${a.skus.length} SKU${a.skus.length > 1 ? 's are' : ' is'} under the minimum with nothing being cut: ${a.skus.slice(0, 5).map((k) => k.code).join(', ')}${a.skus.length > 5 ? '…' : ''}</li>` : ''}
+    ${a.materials.length ? html`<li>${a.materials.length} material${a.materials.length > 1 ? 's are' : ' is'} under the minimum even with what is on order: ${a.materials.slice(0, 5).map((m) => m.code).join(', ')}${a.materials.length > 5 ? '…' : ''}</li>` : ''}</ul></section>`;
+};
 type D = NonNullable<Awaited<ReturnType<typeof load>>>;
 declare function load(): Promise<{ p: Awaited<ReturnType<typeof plan.computePlan>>; reqs: Awaited<ReturnType<typeof plan.listRequests>>; vendors: { id: string; code: string; name: string }[]; fabrics: { id: string; code: string; name: string }[]; styles: { id: string; code: string; name: string; y: number }[]; plans: Map<string, Record<string, unknown>>; manage: boolean; convert: boolean } | null>;
 
@@ -44,11 +53,11 @@ function planTab(d: D): Raw {
 }
 
 function requestsTab(d: D): Raw {
-  const rows = d.reqs as { id: string; number: string; status: string; note: string | null; version: number; vendor: string | null; partner_id: string | null; po_number: string | null; creator: string; lines: { code: string; name: string; qty: number; unit: string; needed_by: string; order_by: string; est_rate: number | null; reason: string | null }[] }[];
+  const rows = d.reqs as { id: string; number: string; status: string; note: string | null; version: number; vendor: string | null; partner_id: string | null; po_number: string | null; po_id: string | null; creator: string; lines: { code: string; name: string; qty: number; unit: string; needed_by: string; order_by: string; est_rate: number | null; reason: string | null }[] }[];
   const tone: Record<string, string> = { open: 'warn', converted: 'ok', cancelled: 'neutral' };
   return html`${d.manage ? html`<section class="card"><div class="row"><label class="inline">Ask for everything that has to be ordered within the next <input id="pn-within" class="num" inputmode="numeric" value="${st.within}" style="width:64px" /> days</label><button class="primary" data-act="pn-gen">Raise purchase requests now</button></div>
     <p class="note">One request per vendor. What an open request already covers is not asked for again, so this is safe to run any time. In a live installation it runs on a daily schedule.</p></section>` : ''}
-  ${rows.length ? rows.map((r) => html`<section class="card"><div class="row between"><h2>${r.number} <span class="chip ${tone[r.status]}">${r.status}</span></h2><span class="sub">${r.vendor ?? 'No vendor chosen'}${r.po_number ? ' · ' + r.po_number : ''} · raised by ${r.creator}</span></div>
+  ${rows.length ? rows.map((r) => html`<section class="card"><div class="row between"><h2>${r.number} <span class="chip ${tone[r.status]}">${r.status}</span></h2><span class="sub">${r.vendor ?? 'No vendor chosen'}${r.po_number ? ' · ' + r.po_number : ''} · raised by ${r.creator}</span>${r.po_id ? html`<button data-act="pn-openpo" data-id="${r.po_id}">Open ${r.po_number}</button>` : ''}</div>
     ${r.note ? html`<p class="note warn-t">${r.note}</p>` : ''}
     <div class="scroll"><table class="mini"><thead><tr><th>Material</th><th class="r">Quantity</th><th>Needed by</th><th>Order by</th><th class="r">Est. price</th></tr></thead><tbody>${r.lines.map((l) => html`<tr><td><span class="mono">${l.code}</span> ${l.name}<br /><small>${l.reason ?? ''}</small></td><td class="r">${qty(String(l.qty))} ${l.unit}</td><td>${dateOnly(l.needed_by)}</td><td class="${l.order_by < d.p.asOf ? 'bad-t' : ''}">${dateOnly(l.order_by)}${l.order_by < d.p.asOf ? ' (already late)' : ''}</td><td class="r">${l.est_rate == null ? '–' : rs(l.qty * l.est_rate)}</td></tr>`)}</tbody></table></div>
     ${r.status === 'open' ? html`<div class="row">${d.convert && r.partner_id ? html`<button class="primary" data-act="pn-convert" data-id="${r.id}" data-v="${r.version}">Make a draft purchase order</button>` : ''}${!r.partner_id ? html`<small class="sub">Give these materials a vendor price or a preferred vendor, then raise the requests again.</small>` : ''}${d.manage ? html`<input id="pn-reason-${r.id}" placeholder="Reason to cancel" style="min-width:180px" /><button data-act="pn-cancel" data-id="${r.id}" data-v="${r.version}">Cancel request</button>` : ''}</div>` : ''}</section>`) : html`<section class="card"><p class="empty">No purchase requests yet.</p></section>`}`;
@@ -91,6 +100,13 @@ export async function onClick(t: HTMLElement): Promise<boolean> {
     case 'pn-tab': st.tab = id as typeof st.tab; return done();
     case 'pn-mat': st.matSel = st.matSel === id ? '' : id; return done();
     case 'pn-pick': st.sel = st.sel === id ? '' : id; return done();
+    case 'pn-run': {
+      const w = Number(val('pn-within') || st.within) || 30;
+      const r = await act('Plan run', (c) => plan.runPlan(c, { withinDays: w }));
+      if (r) { toast(`${r.requests.length} purchase request${r.requests.length === 1 ? '' : 's'} raised, ${r.cutting.length} cutting order${r.cutting.length === 1 ? '' : 's'} drafted${r.cutting.length ? '. Find them under Work orders' : ''}`); await R.render(); }
+      return true;
+    }
+    case 'pn-openpo': S.poId = id; S.view = 'po'; history.replaceState(null, '', '#po'); return done();
     case 'pn-gen': {
       const w = Number(val('pn-within') || st.within); st.within = String(w);
       const r = await act('Requests raised', (c) => plan.generateRequests(c, { withinDays: w }));

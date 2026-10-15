@@ -99,7 +99,8 @@ async function poView(): Promise<Raw> {
     const items = (await db.query(`SELECT id, code, name, stock_unit FROM item WHERE status='active' ORDER BY code`)).rows;
     const vendors = (await db.query(`SELECT id, code, name FROM partner WHERE status='active' AND is_vendor ORDER BY code`)).rows;
     const itemCodes = Object.fromEntries((await db.query('SELECT id, code FROM item')).rows.map((r) => [r.id, r.code]));
-    return { list, sel, rcpt, names, items, vendors, itemCodes };
+    const fromPr = sel ? ((await db.query('SELECT number FROM purchase_request WHERE po_id=$1', [sel.id])).rows[0]?.number as string | undefined) : undefined;
+    return { list, sel, fromPr, rcpt, names, items, vendors, itemCodes };
   });
   const s = d.sel;
   const reason = html`<input id="reason" placeholder="Reason (needed to return, cancel or amend)" aria-label="Reason" />`;
@@ -128,7 +129,7 @@ async function poView(): Promise<Raw> {
     </table></div></div>
     <aside class="card detail">${s ? html`
       <div class="dh"><h2 class="mono">${s.number}</h2>${chip(s.status)}</div>
-      ${kv('Total', money(s.total))}${kv('Version', `v${s.version} · revision ${s.revision}`)}${kv('Created by', d.names[s.created_by] ?? '')}${kv('Approved by', d.names[s.approved_by] ?? '–')}${kv('Released by', d.names[s.released_by] ?? '–')}
+      ${kv('Total', money(s.total))}${kv('Version', `v${s.version} · revision ${s.revision}`)}${d.fromPr ? kv('Raised from', d.fromPr + ' (production plan)') : ''}${kv('Created by', d.names[s.created_by] ?? '')}${kv('Approved by', d.names[s.approved_by] ?? '–')}${kv('Released by', d.names[s.released_by] ?? '–')}
       <h3>Lines</h3>
       <div class="tablewrap"><table class="mini"><thead><tr><th>Item</th><th class="r">Ordered</th><th class="r">Received</th><th class="r">Accepted</th><th class="r">Rejected</th><th class="r">Rate</th><th>Due</th></tr></thead>
       <tbody>${s.lines.map((l: Record<string, string>) => html`<tr><td class="mono">${d.itemCodes[l.item_id]}</td><td class="r num">${qty(l.qty)}</td><td class="r num">${qty(l.received_qty)}</td><td class="r num">${qty(l.accepted_qty)}</td><td class="r num">${qty(l.rejected_qty)}</td><td class="r num">${money(l.rate)}</td><td>${l.due_date ? dateOnly(String(l.due_date).slice(0, 10)) : '–'}</td></tr>`)}</tbody></table></div>

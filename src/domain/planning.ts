@@ -5,13 +5,14 @@
 // purchase request line, dated by when it is needed and when it has to be ordered (needed date minus the vendor's lead time).
 import type { Ctx } from '../core/command.js';
 import type { Db } from '../db/pool.js';
-import { assertCan, visibleSites } from '../core/permissions.js';
+import { assertCan, can, visibleSites } from '../core/permissions.js';
 import { audit } from '../core/audit.js';
 import { nextNumber } from '../core/numbering.js';
 import { badRequest, invalidState, notFound, staleVersion } from '../core/errors.js';
 import { applies, lineQty } from './bom.js';
 import * as po from './po.js';
 
+import { createCutOrder } from './production.js';
 const ANY = { anySite: true } as const;
 const r2 = (n: number) => Math.round(n * 100) / 100;
 const r4 = (n: number) => Math.round(n * 10000) / 10000;
@@ -77,7 +78,7 @@ export async function computePlan(db: Db, userId: string) {
       return row;
     });
     const idle = avg === 0 && min === 0 && !rows.some((r) => r.demand > 0);
-    return { sku_id: k.sku_id as string, item_id: k.item_id as string, code: k.code as string, style: k.style as string, size: k.size as string, colour: k.colour_code as string, bom_version: k.bom_version as number, on_hand: r4(hand), avg_demand: r4(avg), cover_days: cover, min, manual_min: ip.manual_min != null ? n(ip.manual_min) : null, monthly_demand: ip.monthly_demand != null ? n(ip.monthly_demand) : null, idle, rows, pieces: rows.reduce((a, r) => a + r.production, 0) };
+    return { sku_id: k.sku_id as string, style_id: k.style_id as string, item_id: k.item_id as string, code: k.code as string, style: k.style as string, size: k.size as string, colour: k.colour_code as string, bom_version: k.bom_version as number, on_hand: r4(hand), avg_demand: r4(avg), cover_days: cover, min, manual_min: ip.manual_min != null ? n(ip.manual_min) : null, monthly_demand: ip.monthly_demand != null ? n(ip.monthly_demand) : null, idle, rows, pieces: rows.reduce((a, r) => a + r.production, 0) };
   });
 
   // ── supply already on the way: open purchase orders and open purchase requests ──
@@ -230,7 +231,7 @@ export async function generateRequests(ctx: Ctx, i: { withinDays?: number } = {}
 export async function listRequests(db: Db, userId: string) {
   await assertCan(db, userId, 'plan.view', ANY);
   return (await db.query(
-    `SELECT p.id, p.number, p.status, p.note, p.version, p.created_at, p.partner_id, v.name AS vendor, o.number AS po_number, u.display_name AS creator,
+    `SELECT p.id, p.number, p.status, p.note, p.version, p.created_at, p.partner_id, v.name AS vendor, o.number AS po_number, p.po_id, u.display_name AS creator,
             COALESCE((SELECT json_agg(json_build_object('item_id', l.item_id, 'code', i.code, 'name', i.name, 'qty', l.qty::float, 'unit', l.unit, 'needed_by', l.needed_by::text, 'order_by', l.order_by::text, 'est_rate', l.est_rate::float, 'reason', l.reason) ORDER BY l.line_no)
                       FROM purchase_request_line l JOIN item i ON i.id=l.item_id WHERE l.pr_id=p.id), '[]') AS lines
        FROM purchase_request p LEFT JOIN partner v ON v.id=p.partner_id LEFT JOIN purchase_order o ON o.id=p.po_id LEFT JOIN app_user u ON u.id=p.created_by
@@ -262,4 +263,43 @@ export async function cancelRequest(ctx: Ctx, i: { requestId: string; expectedVe
   await ctx.db.query(`UPDATE purchase_request SET status='cancelled', version=version+1 WHERE id=$1`, [p.id]);
   await audit(ctx, { action: 'request.cancel', entityType: 'purchase_request', entityId: p.id, reason: i.reason.trim() });
   return { ok: true };
+}
+
+
+/** Draft cutting orders for the pieces the plan wants this month, one per style. Pieces already on open cutting orders count as stock, so running it twice does not double up. */
+export async function makeCuttingOrders(ctx: Ctx, i: { minPieces?: number } = {}) {
+  await assertCan(ctx.db, ctx.actor.id, 'production.create', ANY);
+  const plan = await computePlan(ctx.db, ctx.actor.id);
+  const sites = await visibleSites(ctx.db, ctx.actor.id, 'production.create');
+  const siteId = sites?.[0] ?? (await ctx.db.query('SELECT id FROM site ORDER BY code LIMIT 1')).rows[0]?.id;
+  if (!siteId) throw invalidState('There is no site to cut at');
+  const by = new Map<string, { code: string; lines: { skuId: string; qty: number }[] }>();
+  for (const k of plan.skus) {
+    const q = k.rows[0]?.production ?? 0; if (q <= 0) continue;
+    const e = by.get(k.style_id) ?? { code: k.style, lines: [] }; e.lines.push({ skuId: k.sku_id, qty: q }); by.set(k.style_id, e);
+  }
+  const orders: { id: string; number: string; style: string; pieces: number }[] = [];
+  for (const [styleId, e] of by) {
+    const pieces = e.lines.reduce((a, l) => a + l.qty, 0); if (pieces < (i.minPieces ?? 1)) continue;
+    const wo = await createCutOrder(ctx, { siteId, styleId, lines: e.lines, notes: `From the plan of ${plan.asOf}` });
+    orders.push({ id: wo.id, number: wo.number, style: e.code, pieces });
+  }
+  return { orders };
+}
+
+/** The daily run: raise purchase requests for what is due, and draft cutting orders for what should be made. */
+export async function runPlan(ctx: Ctx, i: { withinDays?: number } = {}) {
+  const requests = await generateRequests(ctx, i);
+  const cutting = await can(ctx.db, ctx.actor.id, 'production.create', ANY) ? await makeCuttingOrders(ctx) : { orders: [] };
+  return { ...requests, cutting: cutting.orders };
+}
+
+/** What needs attention now: stock under its minimum, buys already late, requests waiting for the buyer. */
+export async function planAlerts(db: Db, userId: string) {
+  const p = await computePlan(db, userId);
+  const skus = p.skus.filter((k) => !k.idle && k.min > 0 && k.on_hand < k.min).map((k) => ({ code: k.code, on_hand: k.on_hand, min: k.min }));
+  const materials = p.materials.filter((m) => m.min > 0 && m.on_hand + m.on_order < m.min).map((m) => ({ code: m.code, name: m.name, unit: m.unit, on_hand: m.on_hand, on_order: m.on_order, min: m.min }));
+  const late = p.buys.filter((b) => b.late).map((b) => ({ code: b.code, qty: b.qty, unit: b.unit, order_by: b.order_by }));
+  const open = Number((await db.query(`SELECT count(*)::int AS n FROM purchase_request WHERE status='open'`)).rows[0].n);
+  return { skus, materials, late, openRequests: open };
 }

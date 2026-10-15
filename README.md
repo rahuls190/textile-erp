@@ -15,7 +15,7 @@ npm install
 npm run migrate                 # create the schema
 npm run seed:demo               # demo company, site, roles, users (password: Demo-Passw0rd!  — dev only)
 npm start                       # API on http://localhost:3000
-npm test                        # 215 tests, each file on a fresh database
+npm test                        # 220 tests, each file on a fresh database
 ```
 
 Try it: `POST /api/login` → use the token as `Authorization: Bearer …`. **Every write needs an `Idempotency-Key`
@@ -118,3 +118,7 @@ load testing from the site survey, and statutory validation with your CA — all
 * Set `AI_KEY_SECRET` on the server (used to seal provider keys). Live model calls need the server to reach the provider; the browser demo cannot, so it uses the built-in reader.
 * Voice uses the browser Web Speech API: Chrome or Edge on a normal web address (GitHub Pages works). The microphone is blocked inside the Claude artifact view.
 * Check the seeded model names against each provider's own model list before switching a provider on.
+
+
+### Automatic daily run
+Set `PLAN_AUTORUN_USER=<planner username>` (and optionally `PLAN_AUTORUN_HOUR`, default 6, server time) and the server raises purchase requests and drafts cutting orders once a day. The same run is the **Run the plan now** button on the Production plan screen.

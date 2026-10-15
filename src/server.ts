@@ -15,6 +15,7 @@ import * as bom from './domain/bom.js';
 import * as bulk from './domain/bulk.js';
 import * as plan from './domain/planning.js';
 import * as prod from './domain/production.js';
+import { startDailyPlan } from './jobs/daily-plan.js';
 import * as sales from './domain/sales.js';
 import * as prefs from './domain/prefs.js';
 import * as admin from './domain/admin.js';
@@ -288,6 +289,9 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
   cmd('/api/plan/items/:id', 'plan.item', z.object({ manualMin: z.string().nullish(), coverDays: z.number().int().nullish(), leadDays: z.number().int().nullish(), monthlyDemand: z.string().nullish(), preferredVendorId: id.nullish(), greyItemId: id.nullish(), finishLossPct: z.string().nullish() }), (c, b, p) => plan.setItemPlan(c, { itemId: p.id, ...b }));
   cmd('/api/plan/demand', 'plan.demand', z.object({ itemId: id, month: z.string(), qty: z.string().nullable(), note: z.string().optional() }), (c, b) => plan.setDemand(c, b));
   cmd('/api/plan/yield', 'plan.yield', z.object({ styleId: id, yieldPct: z.number() }), (c, b) => plan.setCuttingYield(c, b));
+  app.get('/api/plan/alerts', read((db, a) => plan.planAlerts(db, a.id)));
+  cmd('/api/plan/run', 'plan.run', z.object({ withinDays: z.number().int().optional() }), (c, b) => plan.runPlan(c, b), true);
+  cmd('/api/plan/cutting', 'plan.cutting', z.object({}), (c) => plan.makeCuttingOrders(c), true);
   cmd('/api/plan/requests/generate', 'request.create', z.object({ withinDays: z.number().int().optional() }), (c, b) => plan.generateRequests(c, b), true);
   cmd('/api/plan/requests/:id/convert', 'request.convert', z.object({ expectedVersion: ver, partnerId: id.optional() }), (c, b, p) => plan.convertRequest(c, { requestId: p.id, ...b }), true);
   cmd('/api/plan/requests/:id/cancel', 'request.cancel', z.object({ expectedVersion: ver, reason: z.string().min(3) }), (c, b, p) => plan.cancelRequest(c, { requestId: p.id, ...b }));
@@ -369,5 +373,5 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
 
 if (process.argv[1]?.endsWith('server.ts')) {
   const pool = createPool();
-  migrate(pool).then(() => buildServer(pool)).then((app) => app.listen({ port: Number(process.env.PORT ?? 3000), host: '0.0.0.0' }));
+  migrate(pool).then(() => buildServer(pool)).then(async (app) => { await app.listen({ port: Number(process.env.PORT ?? 3000), host: '0.0.0.0' }); startDailyPlan(pool, app.log); });
 }
