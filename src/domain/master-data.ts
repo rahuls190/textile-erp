@@ -208,7 +208,7 @@ async function insertAddress(ctx: Ctx, partnerId: string, kind: string, a: Addre
   return r.rows[0];
 }
 
-export type PartnerProfile = { name?: string; gstin?: string; pan?: string; state?: string; city?: string; phone?: string; email?: string; paymentDays?: number | null; notes?: string; bankAccount?: string };
+export type PartnerProfile = { name?: string; gstin?: string; pan?: string; state?: string; city?: string; phone?: string; email?: string; paymentDays?: number | null; notes?: string; bankAccount?: string; customerType?: 'distributor' | 'retailer' };
 
 function checkProfile(p: PartnerProfile) {
   if (p.gstin && !GSTIN_RE.test(p.gstin.toUpperCase())) throw badRequest('GSTIN looks wrong — it has 15 characters, like 29ABCDE1234F1Z5');
@@ -217,6 +217,7 @@ function checkProfile(p: PartnerProfile) {
   if (p.email && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(p.email)) throw badRequest('Email address looks wrong');
   if (p.phone && !/^[+\d][\d\s-]{6,16}$/.test(p.phone)) throw badRequest('Phone number looks wrong');
   checkState(p.state);
+  if (p.customerType && !['distributor', 'retailer'].includes(p.customerType)) throw badRequest('Customer type: distributor or retailer');
   if (p.paymentDays != null && !(Number.isInteger(p.paymentDays) && p.paymentDays >= 0 && p.paymentDays <= 365)) throw badRequest('Payment days: 0 to 365');
 }
 
@@ -232,9 +233,9 @@ export async function createParty(ctx: Ctx, i: PartnerProfile & { name: string; 
   const vendor = i.role === 'vendor' || i.role === 'both', cust = i.role === 'customer' || i.role === 'both';
   const code = i.code?.trim().toUpperCase() || (await nextCode(ctx.db, 'partner', cust && !vendor ? 'C' : 'V'));
   const r = await ctx.db.query(
-    `INSERT INTO partner(code,name,is_vendor,is_customer,is_subcontractor,gstin,pan,state,city,phone,email,payment_days,notes,bank_account,created_by)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15) RETURNING *`,
-    [code, i.name.trim(), vendor, cust, i.role === 'subcontractor', i.gstin?.toUpperCase() || null, i.pan?.toUpperCase() || null, i.state || null, i.city || null, i.phone || null, i.email || null, i.paymentDays ?? null, i.notes || null, i.bankAccount || null, ctx.actor.id]);
+    `INSERT INTO partner(code,name,is_vendor,is_customer,is_subcontractor,gstin,pan,state,city,phone,email,payment_days,notes,bank_account,created_by,customer_type)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16) RETURNING *`,
+    [code, i.name.trim(), vendor, cust, i.role === 'subcontractor', i.gstin?.toUpperCase() || null, i.pan?.toUpperCase() || null, i.state || null, i.city || null, i.phone || null, i.email || null, i.paymentDays ?? null, i.notes || null, i.bankAccount || null, ctx.actor.id, cust ? (i.customerType ?? 'retailer') : null]);
   const p = r.rows[0];
   if (i.contact?.name.trim()) await ctx.db.query(`INSERT INTO partner_contact(partner_id,name,role,phone,email,is_primary) VALUES ($1,$2,$3,$4,$5,true)`, [p.id, i.contact.name.trim(), i.contact.role || null, i.contact.phone || null, i.contact.email || null]);
   if (i.billing) await insertAddress(ctx, p.id, 'billing', i.billing);
@@ -259,9 +260,9 @@ export async function updateParty(ctx: Ctx, i: PartnerProfile & { partnerId: str
   const reverify = sensitive && ['active', 'suspended'].includes(p.status);
   const r = await ctx.db.query(
     `UPDATE partner SET name=$2, gstin=$3, pan=$4, state=$5, city=$6, phone=$7, email=$8, payment_days=$9, notes=$10, bank_account=$11,
-            bank_verified_by = CASE WHEN $12 THEN NULL ELSE bank_verified_by END, status = CASE WHEN $12 THEN 'verification' ELSE status END, version=version+1
+            bank_verified_by = CASE WHEN $12 THEN NULL ELSE bank_verified_by END, status = CASE WHEN $12 THEN 'verification' ELSE status END, customer_type=$13, version=version+1
       WHERE id=$1 RETURNING *`,
-    [i.partnerId, i.name?.trim() || p.name, gstin, pan, i.state ?? p.state, i.city ?? p.city, i.phone ?? p.phone, i.email ?? p.email, i.paymentDays === undefined ? p.payment_days : i.paymentDays, i.notes ?? p.notes, bank, reverify]);
+    [i.partnerId, i.name?.trim() || p.name, gstin, pan, i.state ?? p.state, i.city ?? p.city, i.phone ?? p.phone, i.email ?? p.email, i.paymentDays === undefined ? p.payment_days : i.paymentDays, i.notes ?? p.notes, bank, reverify, p.is_customer ? (i.customerType ?? p.customer_type ?? 'retailer') : null]);
   const mask = (x: Record<string, unknown>) => ({ ...x, bank_account: x.bank_account ? '••••' + String(x.bank_account).slice(-4) : null });
   await audit(ctx, { action: 'partner.update', entityType: 'partner', entityId: p.id, before: mask(p), after: mask(r.rows[0]), reason: reverify ? 'Bank/GSTIN changed — sent back for verification' : null });
   return { ...r.rows[0], sentBack: reverify };
@@ -342,11 +343,11 @@ export async function reactivateParty(ctx: Ctx, i: { partnerId: string; expected
   return r.rows[0];
 }
 
-export async function listParties(db: Db, userId: string, f: { role: 'vendor' | 'customer'; q?: string; status?: string }) {
+export async function listParties(db: Db, userId: string, f: { role: 'vendor' | 'customer'; customerType?: 'distributor' | 'retailer'; q?: string; status?: string }) {
   if (!(await can(db, userId, 'partner.view', ANY)) && !(f.role === 'customer' && await can(db, userId, 'so.view', ANY))) return null;
   const q = f.q?.trim() ? `%${f.q.trim().toLowerCase()}%` : null;
   return (await db.query(
-    `SELECT p.id, p.code, p.name, p.status, p.version, p.gstin, p.city, p.state, p.phone, p.email, p.payment_days, p.is_vendor, p.is_customer,
+    `SELECT p.id, p.code, p.name, p.status, p.version, p.gstin, p.city, p.state, p.phone, p.email, p.payment_days, p.is_vendor, p.is_customer, COALESCE(p.customer_type, CASE WHEN p.is_customer THEN 'retailer' END) AS customer_type,
             (SELECT name FROM partner_contact c WHERE c.partner_id=p.id ORDER BY is_primary DESC, created_at LIMIT 1) AS contact,
             (SELECT count(*) FROM purchase_order o WHERE o.partner_id=p.id)::int AS pos,
             COALESCE((SELECT sum(total) FROM purchase_order o WHERE o.partner_id=p.id AND o.status NOT IN ('draft','cancelled')),0)::text AS po_value,
@@ -355,7 +356,8 @@ export async function listParties(db: Db, userId: string, f: { role: 'vendor' | 
        FROM partner p
       WHERE ${f.role === 'vendor' ? 'p.is_vendor' : 'p.is_customer'}
         AND ($1::text IS NULL OR lower(p.name) LIKE $1 OR lower(p.code) LIKE $1 OR lower(COALESCE(p.gstin,'')) LIKE $1 OR lower(COALESCE(p.city,'')) LIKE $1)
-        AND ($2::text IS NULL OR p.status=$2) ORDER BY p.name`, [q, f.status || null])).rows;
+        AND ($2::text IS NULL OR p.status=$2)
+        AND ($3::text IS NULL OR COALESCE(p.customer_type,'retailer')=$3) ORDER BY p.name`, [q, f.status || null, f.customerType ?? null])).rows;
 }
 
 export async function getParty(db: Db, userId: string, id: string) {
@@ -375,7 +377,7 @@ export async function getParty(db: Db, userId: string, id: string) {
 }
 
 // ───────────────────────── Bulk add (CSV paste) ─────────────────────────
-function parseCsv(text: string): { head: string[]; rows: string[][] } {
+export function parseCsv(text: string): { head: string[]; rows: string[][] } {
   const rows: string[][] = []; let cur: string[] = []; let f = ''; let q = false;
   const s = text.replace(/\r/g, '');
   for (let k = 0; k < s.length; k++) {
@@ -392,52 +394,80 @@ function parseCsv(text: string): { head: string[]; rows: string[][] } {
   return { head: all[0].map((h) => h.toLowerCase().replace(/\s+/g, '_')), rows: all.slice(1) };
 }
 export const MATERIAL_CSV = 'type,name,description,hsn,gst,reorder_level,unit';
+/** Bulk files may also carry a leading "code" column: a row with a code that already exists changes that item instead of adding one. */
 export const PARTY_CSV = 'role,name,gstin,pan,city,state,phone,email,payment_days,contact_name,contact_phone';
 
-type ImportResult = { created: number; errors: { row: number; message: string }[]; dryRun: boolean };
+export type ImportResult = { created: number; updated?: number; errors: { row: number; message: string }[]; dryRun: boolean };
 
 /** Every row is checked; nothing is saved unless all rows are good (so a bad paste never half-loads). */
-export async function importMaterials(ctx: Ctx, csv: string, dryRun = false): Promise<ImportResult> {
+export async function importMaterials(ctx: Ctx, csv: string, dryRun = false, scope: 'materials' | 'fg' = 'materials'): Promise<ImportResult> {
   await assertCan(ctx.db, ctx.actor.id, 'item.create', ANY);
   const { head, rows } = parseCsv(csv);
-  for (const need of ['type', 'name']) if (!head.includes(need)) throw badRequest(`Header must include "${need}". Expected: ${MATERIAL_CSV} (plus attr_<name> columns)`);
+  if (!head.includes('name')) throw badRequest(`Header must include "name". Expected: ${MATERIAL_CSV} (plus attr_<name> columns)`);
+  if (!head.includes('type') && scope === 'materials') throw badRequest(`Header must include "type". Expected: ${MATERIAL_CSV} (plus attr_<name> columns)`);
   const types = (await ctx.db.query('SELECT * FROM material_type')).rows;
-  const errors: ImportResult['errors'] = []; const seen = new Set<string>(); let created = 0;
+  const errors: ImportResult['errors'] = []; const seen = new Set<string>(); let created = 0, updated = 0;
   await ctx.db.query('SAVEPOINT imp_all');
   for (let n = 0; n < rows.length; n++) {
     const g = (k: string) => rows[n][head.indexOf(k)] ?? '';
-    const t = types.find((x) => x.code.toLowerCase() === g('type').toLowerCase() || x.name.toLowerCase() === g('type').toLowerCase());
     try {
-      if (!t) throw badRequest(`Unknown material type "${g('type')}"`);
-      const key = t.id + g('name').toLowerCase(); if (seen.has(key)) throw badRequest('Listed twice in this paste'); seen.add(key);
       const attributes: Record<string, unknown> = {};
       head.forEach((h, c) => { if (h.startsWith('attr_') && rows[n][c]) attributes[h.slice(5).replace(/_(.)/g, (_, x) => x.toUpperCase())] = rows[n][c]; });
       await ctx.db.query('SAVEPOINT imp');
-      await createMaterial(ctx, { typeId: t.id, name: g('name'), description: g('description'), hsnCode: g('hsn'), gstRate: g('gst'), reorderLevel: g('reorder_level'), unit: g('unit') || undefined, attributes });
-      await ctx.db.query(dryRun ? 'ROLLBACK TO SAVEPOINT imp' : 'RELEASE SAVEPOINT imp'); created++;
+      const code = g('code').toUpperCase();
+      const have = code ? (await ctx.db.query('SELECT id, version, kind FROM item WHERE code=$1', [code])).rows[0] : null;
+      if (have) {
+        if (scope === 'fg' && (await ctx.db.query('SELECT 1 FROM sku WHERE item_id=$1 UNION SELECT 1 FROM sku_pack WHERE item_id=$1', [have.id])).rowCount) throw badRequest(`${code} is a style SKU or pack. Change it on the Products screen`);
+        if ((have.kind === 'FG') !== (scope === 'fg')) throw badRequest(`${code} belongs to the ${have.kind === 'FG' ? 'Finished goods' : 'Materials'} list`);
+        if (seen.has(code)) throw badRequest('Listed twice in this file'); seen.add(code);
+        await updateMaterial(ctx, { itemId: have.id, expectedVersion: have.version, name: g('name') || undefined, description: g('description') || undefined, hsnCode: g('hsn') || undefined, gstRate: g('gst') || undefined, reorderLevel: g('reorder_level') || undefined, attributes: Object.keys(attributes).length ? attributes : undefined });
+        updated++;
+      } else {
+        const t = g('type') ? types.find((x) => x.code.toLowerCase() === g('type').toLowerCase() || x.name.toLowerCase() === g('type').toLowerCase()) : types.find((x) => x.kind === 'FG' && x.status === 'active');
+        if (!t) throw badRequest(g('type') ? `Unknown material type "${g('type')}"` : 'No finished-goods type is set up');
+        if ((t.kind === 'FG') !== (scope === 'fg')) throw badRequest(scope === 'fg' ? `"${t.name}" is not a finished-goods type` : `"${t.name}" is a finished-goods type. Use the Finished goods list`);
+        const key = t.id + g('name').toLowerCase(); if (seen.has(key)) throw badRequest('Listed twice in this file'); seen.add(key);
+        await createMaterial(ctx, { typeId: t.id, name: g('name'), code: code || undefined, description: g('description'), hsnCode: g('hsn'), gstRate: g('gst'), reorderLevel: g('reorder_level'), unit: g('unit') || undefined, attributes });
+        created++;
+      }
+      await ctx.db.query(dryRun ? 'ROLLBACK TO SAVEPOINT imp' : 'RELEASE SAVEPOINT imp');
     } catch (e) { await ctx.db.query('ROLLBACK TO SAVEPOINT imp').catch(() => {}); errors.push({ row: n + 2, message: (e as Error).message }); }
   }
   if (errors.length || dryRun) await ctx.db.query('ROLLBACK TO SAVEPOINT imp_all');
-  return { created: errors.length ? 0 : created, errors, dryRun };
+  return { created: errors.length ? 0 : created, updated: errors.length ? 0 : updated, errors, dryRun };
 }
 
-export async function importParties(ctx: Ctx, csv: string, dryRun = false): Promise<ImportResult> {
+export async function importParties(ctx: Ctx, csv: string, dryRun = false, scope?: 'vendor' | 'distributor' | 'retailer'): Promise<ImportResult> {
   await assertCan(ctx.db, ctx.actor.id, 'partner.create', ANY);
   const { head, rows } = parseCsv(csv);
-  for (const need of ['role', 'name']) if (!head.includes(need)) throw badRequest(`Header must include "${need}". Expected: ${PARTY_CSV}`);
-  const errors: ImportResult['errors'] = []; let created = 0;
+  if (!head.includes('name')) throw badRequest(`Header must include "name". Expected: ${PARTY_CSV}`);
+  if (!scope && !head.includes('role')) throw badRequest(`Header must include "role". Expected: ${PARTY_CSV}`);
+  const errors: ImportResult['errors'] = []; let created = 0, updated = 0; const seen = new Set<string>();
   await ctx.db.query('SAVEPOINT imp_all');
   for (let n = 0; n < rows.length; n++) {
     const g = (k: string) => rows[n][head.indexOf(k)] ?? '';
     try {
-      const role = g('role').toLowerCase();
-      if (!['vendor', 'customer', 'client', 'both'].includes(role)) throw badRequest(`Role must be vendor, customer or both (got "${g('role')}")`);
+      const role = (g('role') || scope || '').toLowerCase();
+      if (!['vendor', 'customer', 'client', 'distributor', 'retailer', 'both'].includes(role)) throw badRequest(`Role must be vendor, distributor or retailer (got "${g('role')}")`);
+      if (scope && (scope === 'vendor' ? role !== 'vendor' : role === 'vendor' || role === 'both')) throw badRequest(`This list takes ${scope}s only (got "${role}")`);
+      const customerType = role === 'distributor' ? 'distributor' : role === 'retailer' || role === 'customer' || role === 'client' ? 'retailer' : undefined;
+      const dbRole = role === 'vendor' ? 'vendor' : role === 'both' ? 'both' : 'customer';
+      const profile = { gstin: g('gstin'), pan: g('pan'), city: g('city'), state: g('state'), phone: g('phone'), email: g('email'), paymentDays: g('payment_days') ? Number(g('payment_days')) : undefined };
       await ctx.db.query('SAVEPOINT imp');
-      await createParty(ctx, { name: g('name'), role: role === 'client' ? 'customer' : (role as 'vendor'), gstin: g('gstin'), pan: g('pan'), city: g('city'), state: g('state'), phone: g('phone'), email: g('email'),
-        paymentDays: g('payment_days') ? Number(g('payment_days')) : undefined, contact: g('contact_name') ? { name: g('contact_name'), phone: g('contact_phone') } : undefined });
-      await ctx.db.query(dryRun ? 'ROLLBACK TO SAVEPOINT imp' : 'RELEASE SAVEPOINT imp'); created++;
+      const code = g('code').toUpperCase();
+      const have = code ? (await ctx.db.query('SELECT id, version, is_vendor, is_customer FROM partner WHERE code=$1', [code])).rows[0] : null;
+      if (have) {
+        if (seen.has(code)) throw badRequest('Listed twice in this file'); seen.add(code);
+        if (scope === 'vendor' ? !have.is_vendor : scope && !have.is_customer) throw badRequest(`${code} is not in this list`);
+        await updateParty(ctx, { partnerId: have.id, expectedVersion: have.version, name: g('name') || undefined, ...profile, customerType: have.is_customer ? customerType : undefined });
+        updated++;
+      } else {
+        await createParty(ctx, { name: g('name'), role: dbRole, code: code || undefined, ...profile, customerType, contact: g('contact_name') ? { name: g('contact_name'), phone: g('contact_phone') } : undefined });
+        created++;
+      }
+      await ctx.db.query(dryRun ? 'ROLLBACK TO SAVEPOINT imp' : 'RELEASE SAVEPOINT imp');
     } catch (e) { await ctx.db.query('ROLLBACK TO SAVEPOINT imp').catch(() => {}); errors.push({ row: n + 2, message: (e as Error).message }); }
   }
   if (errors.length || dryRun) await ctx.db.query('ROLLBACK TO SAVEPOINT imp_all');
-  return { created: errors.length ? 0 : created, errors, dryRun };
+  return { created: errors.length ? 0 : created, updated: errors.length ? 0 : updated, errors, dryRun };
 }

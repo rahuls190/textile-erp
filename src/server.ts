@@ -12,6 +12,7 @@ import * as ai from './domain/ai.js';
 import * as barcode from './domain/barcode.js';
 import * as bcs from './domain/barcodes.js';
 import * as bom from './domain/bom.js';
+import * as bulk from './domain/bulk.js';
 import * as sales from './domain/sales.js';
 import * as prefs from './domain/prefs.js';
 import * as admin from './domain/admin.js';
@@ -112,7 +113,7 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
   cmd('/api/materials/import', 'item.create', z.object({ csv: z.string(), dryRun: z.boolean().optional() }), (c, b) => mdata.importMaterials(c, b.csv, b.dryRun));
   app.get('/api/parties', read((db, a, r) => mdata.listParties(db, a.id, { role: qs(r).role === 'customer' ? 'customer' : 'vendor', q: qs(r).q, status: qs(r).status })));
   app.get('/api/parties/:id', read((db, a, r) => mdata.getParty(db, a.id, (r.params as { id: string }).id)));
-  cmd('/api/parties', 'partner.create', z.object({ name: z.string(), role: z.enum(['vendor', 'customer', 'both', 'subcontractor']), gstin: z.string().optional(), pan: z.string().optional(), city: z.string().optional(), state: z.string().optional(), phone: z.string().optional(), email: z.string().optional(), paymentDays: z.number().int().optional(), bankAccount: z.string().optional(), billing: z.object({ label: z.string().optional(), line1: z.string(), line2: z.string().optional(), city: z.string().optional(), state: z.string().optional(), pincode: z.string().optional(), contactName: z.string().optional(), phone: z.string().optional(), gstin: z.string().optional() }).optional(), shipping: z.object({ label: z.string().optional(), line1: z.string(), line2: z.string().optional(), city: z.string().optional(), state: z.string().optional(), pincode: z.string().optional(), contactName: z.string().optional(), phone: z.string().optional(), gstin: z.string().optional() }).optional(), shippingSameAsBilling: z.boolean().optional() }), (c, b) => mdata.createParty(c, b), true);
+  cmd('/api/parties', 'partner.create', z.object({ name: z.string(), role: z.enum(['vendor', 'customer', 'both', 'subcontractor']), customerType: z.enum(['distributor', 'retailer']).optional(), gstin: z.string().optional(), pan: z.string().optional(), city: z.string().optional(), state: z.string().optional(), phone: z.string().optional(), email: z.string().optional(), paymentDays: z.number().int().optional(), bankAccount: z.string().optional(), billing: z.object({ label: z.string().optional(), line1: z.string(), line2: z.string().optional(), city: z.string().optional(), state: z.string().optional(), pincode: z.string().optional(), contactName: z.string().optional(), phone: z.string().optional(), gstin: z.string().optional() }).optional(), shipping: z.object({ label: z.string().optional(), line1: z.string(), line2: z.string().optional(), city: z.string().optional(), state: z.string().optional(), pincode: z.string().optional(), contactName: z.string().optional(), phone: z.string().optional(), gstin: z.string().optional() }).optional(), shippingSameAsBilling: z.boolean().optional() }), (c, b) => mdata.createParty(c, b), true);
   cmd('/api/parties/:id/addresses', 'partner.edit', z.object({ label: z.string().optional(), line1: z.string(), line2: z.string().optional(), city: z.string().optional(), state: z.string().optional(), pincode: z.string().optional(), contactName: z.string().optional(), phone: z.string().optional(), gstin: z.string().optional(), kind: z.enum(['registered', 'billing', 'shipping', 'works']), makeDefault: z.boolean().optional() }), (c, b, p) => mdata.addAddress(c, { ...b, partnerId: p.id }), true);
   cmd('/api/addresses/:id/update', 'partner.edit', z.object({ label: z.string().optional(), line1: z.string(), line2: z.string().optional(), city: z.string().optional(), state: z.string().optional(), pincode: z.string().optional(), contactName: z.string().optional(), phone: z.string().optional(), gstin: z.string().optional() }), (c, b, p) => mdata.updateAddress(c, { ...b, addressId: p.id }));
   cmd('/api/addresses/:id/default', 'partner.edit', none, (c, _b, p) => mdata.setDefaultAddress(c, { addressId: p.id }));
@@ -267,6 +268,16 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
   cmd('/api/boms/:id/discard', 'bom.discard', rev, (c, b, p) => bom.discardBom(c, { bomId: p.id, expectedRev: b.expectedRev }));
   cmd('/api/packs', 'pack.create', z.object({ code: z.string(), name: z.string(), notes: z.string().optional(), skus: z.array(z.object({ skuId: id, qty: z.number().int() })).min(1), materials: z.array(z.object({ itemId: id, qty: z.string() })).optional() }), (c, b) => bom.createPack(c, b), true);
   cmd('/api/packs/:id/status', 'pack.status', z.object({ status: z.enum(['active', 'inactive']) }), (c, b, p) => bom.setPackStatus(c, { packId: p.id, status: b.status }));
+
+  // ── master lists: export and import (CSV in the same columns both ways) ──
+  const headEnum = z.enum(['vendors', 'distributors', 'retailers', 'materials', 'finished', 'skus']);
+  app.get('/api/export/:head', read((db, a, r) => bulk.exportCsv(db, a.id, headEnum.parse((r.params as { head: string }).head))));
+  cmd('/api/import/:head', 'master.import', z.object({ csv: z.string().max(2_000_000), dryRun: z.boolean().optional() }), (c, b, p) => {
+    const h = headEnum.parse(p.head);
+    if (h === 'skus') return bulk.importSkus(c, b.csv, !!b.dryRun);
+    if (h === 'materials' || h === 'finished') return mdata.importMaterials(c, b.csv, !!b.dryRun, h === 'finished' ? 'fg' : 'materials');
+    return mdata.importParties(c, b.csv, !!b.dryRun, h === 'vendors' ? 'vendor' : h === 'distributors' ? 'distributor' : 'retailer');
+  });
 
   // ── purchase orders ──
   const poLine = z.object({ itemId: id, qty: pos, rate: pos.optional(), dueDate: date.nullish() });

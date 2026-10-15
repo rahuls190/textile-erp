@@ -4,11 +4,12 @@ import * as md from '../src/domain/master-data.js';
 import * as masters from '../src/domain/masters.js';
 import * as admin from '../src/domain/admin.js';
 import { can } from '../src/core/permissions.js';
+import { bulkBar } from './views-bulk.js';
 
 const ANY = { anySite: true } as const;
 const st = {
   matQ: '', matType: '', matStatus: '', mat: '', newType: '', draft: {} as Record<string, string>, typ: '', unitForm: false,
-  q: { vendor: '', customer: '' } as Record<string, string>, stat: { vendor: '', customer: '' } as Record<string, string>, sel: { vendor: '', customer: '' } as Record<string, string>,
+  q: { vendor: '', distributor: '', retailer: '' } as Record<string, string>, stat: { vendor: '', distributor: '', retailer: '' } as Record<string, string>, sel: { vendor: '', distributor: '', retailer: '' } as Record<string, string>,
   importRes: null as null | { created: number; errors: { row: number; message: string }[]; dryRun: boolean; what: string },
 };
 const open = new Set<string>();
@@ -37,14 +38,18 @@ function importBox(kind: 'materials' | 'parties', sample: string, header: string
 }
 
 // ───────────────────────── Materials ─────────────────────────
-export async function materialsView(): Promise<Raw> {
+export const materialsView = () => itemsView('materials');
+export const finishedView = () => itemsView('finished');
+async function itemsView(mode: 'materials' | 'finished'): Promise<Raw> {
+  const FGM = mode === 'finished'; const keep = (k: string) => (k === 'FG') === FGM;
   const d = await read(async (db) => {
-    const types = await md.listMaterialTypes(db, uid());
-    const all = await md.listMaterials(db, uid());
-    const list = await md.listMaterials(db, uid(), { q: st.matQ, typeId: st.matType, status: st.matStatus });
+    const types = (await md.listMaterialTypes(db, uid())).filter((t) => keep(t.kind));
+    const all = (await md.listMaterials(db, uid())).filter((m) => keep(m.kind));
+    const list = (await md.listMaterials(db, uid(), { q: st.matQ, typeId: st.matType, status: st.matStatus })).filter((m) => keep(m.kind));
+    const made = new Set((await db.query('SELECT item_id FROM sku UNION SELECT item_id FROM sku_pack')).rows.map((r) => r.item_id as string));
     const sel = st.mat ? await md.getMaterial(db, uid(), st.mat).catch(() => null) : null;
     const c = (p: string) => can(db, uid(), p, ANY);
-    return { types, all, list, sel, units: await md.listUnits(db), create: await c('item.create'), edit: await c('item.edit'), submit: await c('item.submit'), approve: await c('item.approve'), deact: await c('item.deactivate') };
+    return { types, all, list, sel, made, units: await md.listUnits(db), create: await c('item.create'), edit: await c('item.edit'), submit: await c('item.submit'), approve: await c('item.approve'), deact: await c('item.deactivate') };
   });
   if (!d.types.length && !d.all.length) return denied('Materials', 'Everything you buy, make or sell.', 'Your role cannot see the materials list.');
   const low = d.all.filter((m) => m.status === 'active' && m.reorder_level && Number(m.on_hand) < Number(m.reorder_level));
@@ -55,11 +60,11 @@ export async function materialsView(): Promise<Raw> {
   const nt = d.types.find((t) => t.id === st.newType);
   const mine = it && it.created_by === uid();
   const fld = (a: md.AttrDef, cur: unknown, p: string) => html`<label>${a.label}${a.unit ? html` <small>(${a.unit})</small>` : ''}${a.required ? html` <small>required</small>` : ''}<input id="${p}${a.key}" ${a.type === 'number' ? raw('inputmode="decimal"') : ''} value="${cur ?? ''}" /></label>`;
-  return html`${head('Materials', 'Everything you buy, make or sell. Each belongs to a type, so nothing is described twice.', d.create ? html`<div class="row"><button class="primary" data-act="mat-new">New material</button><button data-act="mx-import-materials">Bulk add</button></div>` : undefined)}
-  <section class="card crm-sum"><div class="crm-k"><span>Materials</span><b>${d.all.length}</b></div><div class="crm-k"><span>In use</span><b>${d.all.filter((m) => m.status === 'active').length}</b></div>
+  return html`${head(FGM ? 'Finished goods' : 'Materials', FGM ? 'What you sell: garments made from styles, boxed packs, and anything else you stock for sale.' : 'Everything you buy or make for production. Each belongs to a type, so nothing is described twice.', d.create ? html`<button class="primary" data-act="mat-new">${FGM ? 'New finished good' : 'New material'}</button>` : undefined)}
+  ${bulkBar(FGM ? 'finished' : 'materials', d.create)}
+  <section class="card crm-sum"><div class="crm-k"><span>${FGM ? 'Finished goods' : 'Materials'}</span><b>${d.all.length}</b></div><div class="crm-k"><span>In use</span><b>${d.all.filter((m) => m.status === 'active').length}</b></div>
     <div class="crm-k"><span>Waiting for approval</span><b class="${waiting.length ? 'warn-t' : ''}">${waiting.length}</b></div><div class="crm-k"><span>Below reorder level</span><b class="${low.length ? 'bad-t' : ''}">${low.length}</b></div></section>
   ${byType.length ? html`<section class="card"><h2>By type</h2><div class="tbars">${byType.map((t) => html`<button class="tbar ${st.matType === t.id ? 'on' : ''}" data-act="mat-typefilter" data-id="${t.id}" title="Show only ${t.name}"><span>${t.name}</span><i style="width:${Math.max(4, (t.items / maxN) * 100)}%"></i><b>${t.items}</b></button>`)}</div></section>` : ''}
-  ${open.has('importmaterials') && d.create ? importBox('materials', 'type,name,hsn,gst,attr_width,attr_gsm\nKNIT,Interlock 200 GSM,6006,5,170,200', 'type, name, description, hsn, gst, reorder_level, unit, attr_<name>…') : ''}
   ${open.has('newmat') && d.create ? html`<form class="card form" data-form="newmat"><h2>New material</h2>
     <label>Type<select id="mat-type">${opts(d.types.filter((t) => t.status === 'active').map((t) => ({ id: t.id, label: `${t.name} · ${KIND_LABEL[t.kind]}` })), st.newType, 'Choose a type…')}</select></label>
     ${nt ? html`<p class="sub">Code will be given automatically (${nt.code_prefix}-…). ${nt.attr_schema.length ? 'This type needs: ' + nt.attr_schema.map((a: md.AttrDef) => a.label).join(', ') + '.' : ''}</p>
@@ -69,17 +74,17 @@ export async function materialsView(): Promise<Raw> {
     <label>Reorder level<input id="mat-reorder" inputmode="decimal" value="${dv('mat-reorder')}" /></label><label>Notes<input id="mat-desc" value="${dv('mat-desc')}" /></label>
     ${nt.attr_schema.map((a: md.AttrDef) => fld(a, dv('na-' + a.key), 'na-'))}</div>
     <div class="row"><button class="primary" type="submit">Save as draft</button><button type="button" data-act="mat-new">Cancel</button></div>` : html`<p class="empty">Pick a type first. The form then asks for exactly what that type needs.</p>`}</form>` : ''}
-  <section class="split"><div class="card"><h2>Materials</h2>
+  <section class="split"><div class="card"><h2>${FGM ? 'Finished goods' : 'Materials'}</h2>
     <div class="row"><input id="mat-q" type="search" placeholder="Search code or name" value="${st.matQ}" style="flex:1;min-width:140px" /><select id="mat-sf" aria-label="Status">${opts([{ id: 'active', label: 'In use' }, { id: 'draft', label: 'Draft' }, { id: 'submitted', label: 'Waiting for approval' }, { id: 'inactive', label: 'Switched off' }], st.matStatus, 'Any status')}</select>${st.matType ? html`<button data-act="mat-typefilter" data-id="">Clear type filter</button>` : ''}</div>
     ${d.list.length ? html`<div class="scroll"><table class="mini"><thead><tr><th>Code</th><th>Name</th><th>Type</th><th class="r">In stock</th><th>Status</th></tr></thead><tbody>${d.list.map((m) => { const lowM = m.status === 'active' && m.reorder_level && Number(m.on_hand) < Number(m.reorder_level);
-      return html`<tr class="pick ${m.id === st.mat ? 'on' : ''}" data-act="mat-pick" data-id="${m.id}" tabindex="0"><td>${m.code}</td><td>${m.name}</td><td><small>${m.type_name ?? 'no type'}</small></td><td class="r">${qty(m.on_hand)} ${m.stock_unit}${lowM ? html` <span class="chip bad">low</span>` : ''}</td><td>${sChip(m.status)}</td></tr>`; })}</tbody></table></div>` : html`<p class="empty">Nothing matches.</p>`}</div>
+      return html`<tr class="pick ${m.id === st.mat ? 'on' : ''}" data-act="mat-pick" data-id="${m.id}" tabindex="0"><td>${m.code}</td><td>${m.name}</td><td><small>${m.type_name ?? 'no type'}${FGM && d.made.has(m.id) ? ' · from a style or pack' : ''}</small></td><td class="r">${qty(m.on_hand)} ${m.stock_unit}${lowM ? html` <span class="chip bad">low</span>` : ''}</td><td>${sChip(m.status)}</td></tr>`; })}</tbody></table></div>` : html`<p class="empty">Nothing matches.</p>`}</div>
   <div class="card">${s && it ? html`<h2>${it.name} ${sChip(it.status)}</h2><p class="sub">${it.code} · ${it.type_name ?? 'no type'} · counted in ${it.stock_unit} · ${it.tracking === 'ROLL' ? 'tracked by roll' : it.tracking === 'LOT' ? 'tracked by lot' : 'not tracked'}</p>
     ${open.has('editmat') && d.edit && it.status !== 'submitted' ? html`<form class="form" data-form="editmat"><div class="grid2"><label>Name<input id="em-name" value="${it.name}" /></label><label>HSN code<input id="em-hsn" value="${it.hsn_code ?? ''}" /></label><label>GST %<input id="em-gst" value="${it.gst_rate ?? ''}" /></label><label>Reorder level<input id="em-reorder" value="${it.reorder_level ? Number(it.reorder_level) : ''}" /></label><label>Notes<input id="em-desc" value="${it.description ?? ''}" /></label>
       ${(it.attr_schema ?? []).map((a: md.AttrDef) => fld(a, it.attributes?.[a.key], 'ea-'))}</div><div class="row"><button class="primary" type="submit">Save changes</button><button type="button" data-act="mat-edit">Cancel</button></div></form>` : html`
     <div class="kvs"><div class="kv"><span>HSN code</span><b>${it.hsn_code ?? '–'}</b></div><div class="kv"><span>GST</span><b>${it.gst_rate ? Number(it.gst_rate) + '%' : '–'}</b></div><div class="kv"><span>Reorder level</span><b>${it.reorder_level ? qty(it.reorder_level) + ' ' + it.stock_unit : '–'}</b></div>
       ${(it.attr_schema ?? []).map((a: md.AttrDef) => html`<div class="kv"><span>${a.label}</span><b>${it.attributes?.[a.key] ?? '–'}${it.attributes?.[a.key] && a.unit ? ' ' + a.unit : ''}</b></div>`)}</div>
     ${it.description ? html`<p>${it.description}</p>` : ''}`}
-    <div class="row">${d.edit && it.status !== 'submitted' && !open.has('editmat') ? html`<button data-act="mat-edit">Edit</button>` : ''}
+    <div class="row">${d.edit && it.status !== 'submitted' && !open.has('editmat') && !(FGM && d.made.has(it.id)) ? html`<button data-act="mat-edit">Edit</button>` : ''}${FGM && d.made.has(it.id) ? html`<small class="sub">Made from a style or pack. Change it on the Products screen.</small>` : ''}
       ${it.status === 'draft' && d.submit ? html`<button class="primary" data-act="mat-submit">Send for approval</button>` : ''}
       ${it.status === 'submitted' && d.approve && !mine ? html`<button class="primary" data-act="mat-approve">Approve</button>` : ''}${it.status === 'submitted' && mine ? html`<small class="sub">Waiting for someone else to approve. You cannot approve what you made.</small>` : ''}
       ${it.status === 'active' && d.deact ? html`<button data-act="mat-offopen">Switch off…</button>` : ''}${it.status === 'inactive' && d.deact ? html`<button data-act="mat-on">Switch back on</button>` : ''}</div>
@@ -112,12 +117,13 @@ export async function typesView(): Promise<Raw> {
 }
 
 // ───────────────────────── Vendors & clients ─────────────────────────
-export async function partiesView(role: 'vendor' | 'customer'): Promise<Raw> {
-  const V = role === 'vendor'; const W = V ? 'Vendors' : 'Clients'; const noun = V ? 'vendor' : 'client';
+export async function partiesView(kind: 'vendor' | 'distributor' | 'retailer'): Promise<Raw> {
+  const role = kind === 'vendor' ? 'vendor' : 'customer'; const customerType = kind === 'vendor' ? undefined : kind;
+  const V = role === 'vendor'; const W = V ? 'Vendors' : kind === 'distributor' ? 'Distributors' : 'Retailers'; const noun = kind;
   const d = await read(async (db) => {
-    const all = await md.listParties(db, uid(), { role });
-    const list = all && await md.listParties(db, uid(), { role, q: st.q[role], status: st.stat[role] });
-    const sel = st.sel[role] ? await md.getParty(db, uid(), st.sel[role]).catch(() => null) : null;
+    const all = await md.listParties(db, uid(), { role, customerType });
+    const list = all && await md.listParties(db, uid(), { role, customerType, q: st.q[kind], status: st.stat[kind] });
+    const sel = st.sel[kind] ? await md.getParty(db, uid(), st.sel[kind]).catch(() => null) : null;
     const c = (p: string) => can(db, uid(), p, ANY);
     return { all, list, sel, items: (await db.query(`SELECT id, code, name FROM item WHERE status='active' ORDER BY code`)).rows,
       create: await c('partner.create'), edit: await c('partner.edit'), submit: await c('partner.submit'), bankOk: await c('partner.bank.approve'), approve: await c('partner.trade.approve'), suspend: await c('partner.suspend'),
@@ -133,11 +139,12 @@ export async function partiesView(role: 'vendor' | 'customer'): Promise<Raw> {
   const rateMine = (r: { proposed_by: string }) => r.proposed_by === uid();
   const step = (label: string, on: boolean, done: boolean) => html`<li class="${done ? 'done' : on ? 'now' : ''}">${label}</li>`;
   const phase = !p ? 0 : p.status === 'draft' ? 1 : p.status === 'verification' ? 2 : 3;
-  return html`${head(W, V ? 'Who you buy from: details, contacts, prices and how they have performed.' : 'Who you sell to: details, contacts, credit and orders.', d.create ? html`<div class="row"><button class="primary" data-act="p-new">New ${noun}</button><button data-act="mx-import-parties">Bulk add</button></div>` : undefined)}
+  return html`${head(W, V ? 'Who you buy from: details, contacts, prices and how they have performed.' : kind === 'distributor' ? 'Distributors buy in volume and resell: details, contacts, credit and orders.' : 'Retailers who sell to the end customer: details, contacts, credit and orders.', d.create ? html`<button class="primary" data-act="p-new">New ${noun}</button>` : undefined)}
+  ${bulkBar(V ? 'vendors' : kind === 'distributor' ? 'distributors' : 'retailers', d.create)}
   <section class="card crm-sum"><div class="crm-k"><span>${W}</span><b>${d.all.length}</b></div><div class="crm-k"><span>Approved</span><b>${d.all.filter((x) => x.status === 'active').length}</b></div><div class="crm-k"><span>Waiting for checks</span><b class="${waiting.length ? 'warn-t' : ''}">${waiting.length}</b></div>
     <div class="crm-k"><span>Suspended</span><b class="${d.all.some((x) => x.status === 'suspended') ? 'bad-t' : ''}">${d.all.filter((x) => x.status === 'suspended').length}</b></div><div class="crm-k"><span>${V ? 'Bought so far' : 'Ordered so far'}</span><b>${inr(total)}</b></div></section>
   ${top.length ? html`<section class="card"><h2>${V ? 'Biggest vendors by value' : 'Biggest clients by value'}</h2><div class="tbars">${top.map((x) => html`<button class="tbar" data-act="p-pick" data-id="${x.id}"><span>${x.name}</span><i style="width:${Math.max(4, (Number(V ? x.po_value : x.order_value) / topMax) * 100)}%"></i><b>${inr(Number(V ? x.po_value : x.order_value))}</b></button>`)}</div></section>` : ''}
-  ${open.has('importparties') && d.create ? importBox('parties', 'role,name,gstin,city,payment_days,contact_name\nvendor,Om Trims,24AAACO1111F1Z4,Surat,30,Raju', 'role (vendor/customer/both), name, gstin, pan, city, state, phone, email, payment_days, contact_name, contact_phone') : ''}
+  ${false ? importBox('parties', 'role,name,gstin,city,payment_days,contact_name\nvendor,Om Trims,24AAACO1111F1Z4,Surat,30,Raju', 'role (vendor/customer/both), name, gstin, pan, city, state, phone, email, payment_days, contact_name, contact_phone') : ''}
   ${open.has('newparty') && d.create ? html`<form class="card form" data-form="newparty"><h2>New ${noun}</h2><div class="grid2"><label>Name<input id="np-name" required /></label><label>GSTIN<input id="np-gstin" placeholder="29ABCDE1234F1Z5" /></label><label>PAN<input id="np-pan" placeholder="ABCDE1234F" /></label>
     <label>City<input id="np-city" /></label><label>State<select id="np-state">${opts(INDIAN_STATES.map((x) => ({ id: x, label: x })), '', 'Choose…')}</select></label><label>Phone<input id="np-phone" inputmode="tel" /></label><label>Email<input id="np-email" type="email" /></label>
     <label>Payment days<input id="np-days" inputmode="numeric" placeholder="${V ? 'what they give us' : 'what we give them'}" /></label><label>Main contact<input id="np-cname" /></label><label>Contact phone<input id="np-cphone" inputmode="tel" /></label>
@@ -146,12 +153,12 @@ export async function partiesView(role: 'vendor' | 'customer'): Promise<Raw> {
     <h3>Shipping address</h3><label class="chk"><input type="checkbox" id="ns-same" checked /> Same as billing</label><div id="ns-box" hidden>${addrFields('ns-')}</div>
     <div class="row"><button class="primary" type="submit">Save as draft</button><button type="button" data-act="p-new">Cancel</button></div></form>` : ''}
   <section class="split"><div class="card"><h2>${W}</h2>
-    <div class="row"><input id="p-q" type="search" placeholder="Search name, code, GSTIN or city" value="${st.q[role]}" style="flex:1;min-width:140px" /><select id="p-sf" aria-label="Status">${opts([{ id: 'active', label: 'Approved' }, { id: 'draft', label: 'Draft' }, { id: 'verification', label: 'Waiting for checks' }, { id: 'suspended', label: 'Suspended' }], st.stat[role], 'Any status')}</select></div>
-    ${d.list && d.list.length ? html`<div class="scroll"><table class="mini"><thead><tr><th>Code</th><th>Name</th><th>City</th><th class="r">${V ? 'Orders' : 'Orders'}</th><th>Status</th></tr></thead><tbody>${d.list.map((x) => html`<tr class="pick ${x.id === st.sel[role] ? 'on' : ''}" data-act="p-pick" data-id="${x.id}" tabindex="0"><td>${x.code}</td><td>${x.name}${x.contact ? html`<br><small>${x.contact}</small>` : ''}</td><td>${x.city ?? ''}</td><td class="r">${V ? x.pos : x.orders}</td><td>${sChip(x.status)}</td></tr>`)}</tbody></table></div>` : html`<p class="empty">Nothing matches.</p>`}</div>
+    <div class="row"><input id="p-q" type="search" placeholder="Search name, code, GSTIN or city" value="${st.q[kind]}" style="flex:1;min-width:140px" /><select id="p-sf" aria-label="Status">${opts([{ id: 'active', label: 'Approved' }, { id: 'draft', label: 'Draft' }, { id: 'verification', label: 'Waiting for checks' }, { id: 'suspended', label: 'Suspended' }], st.stat[kind], 'Any status')}</select></div>
+    ${d.list && d.list.length ? html`<div class="scroll"><table class="mini"><thead><tr><th>Code</th><th>Name</th><th>City</th><th class="r">${V ? 'Orders' : 'Orders'}</th><th>Status</th></tr></thead><tbody>${d.list.map((x) => html`<tr class="pick ${x.id === st.sel[kind] ? 'on' : ''}" data-act="p-pick" data-id="${x.id}" tabindex="0"><td>${x.code}</td><td>${x.name}${x.contact ? html`<br><small>${x.contact}</small>` : ''}</td><td>${x.city ?? ''}</td><td class="r">${V ? x.pos : x.orders}</td><td>${sChip(x.status)}</td></tr>`)}</tbody></table></div>` : html`<p class="empty">Nothing matches.</p>`}</div>
   <div class="card">${s && p ? html`<h2>${p.name} ${sChip(p.status)}</h2><p class="sub">${p.code}${p.city ? ' · ' + p.city : ''}${p.state ? ', ' + p.state : ''} · added by ${s.creator}</p>
     <ol class="wf">${step('Details added', phase === 1, phase > 1)}${step('Checked' + (V ? ' (bank by finance)' : ''), phase === 2, phase > 2)}${step('Approved', phase === 3 && p.status === 'active', p.status === 'active')}</ol>
     ${open.has('editparty') && d.edit ? html`<form class="form" data-form="editparty"><div class="grid2"><label>Name<input id="ep-name" value="${p.name}" /></label><label>GSTIN<input id="ep-gstin" value="${p.gstin ?? ''}" /></label><label>PAN<input id="ep-pan" value="${p.pan ?? ''}" /></label><label>City<input id="ep-city" value="${p.city ?? ''}" /></label>
-      <label>State<select id="ep-state">${opts(INDIAN_STATES.map((x) => ({ id: x, label: x })), p.state ?? '', 'Choose…')}</select></label><label>Phone<input id="ep-phone" value="${p.phone ?? ''}" /></label><label>Email<input id="ep-email" value="${p.email ?? ''}" /></label><label>Payment days<input id="ep-days" value="${p.payment_days ?? ''}" /></label>
+      <label>State<select id="ep-state">${opts(INDIAN_STATES.map((x) => ({ id: x, label: x })), p.state ?? '', 'Choose…')}</select></label><label>Phone<input id="ep-phone" value="${p.phone ?? ''}" /></label><label>Email<input id="ep-email" value="${p.email ?? ''}" /></label><label>Payment days<input id="ep-days" value="${p.payment_days ?? ''}" /></label>${!V ? html`<label>Customer type<select id="ep-type">${opts([{ id: 'distributor', label: 'Distributor' }, { id: 'retailer', label: 'Retailer' }], p.customer_type ?? 'retailer')}</select></label>` : ''}
       ${V || p.bank_account ? html`<label>Bank account <small>(blank = keep ${p.bank_account ?? 'none'})</small><input id="ep-bank" inputmode="numeric" /></label>` : ''}</div><label>Notes<input id="ep-notes" value="${p.notes ?? ''}" /></label>
       ${['active', 'suspended'].includes(p.status) ? html`<p class="sub">Changing the GSTIN or bank account sends this ${noun} back for checking until it is approved again.</p>` : ''}<div class="row"><button class="primary" type="submit">Save</button><button type="button" data-act="p-edit">Cancel</button></div></form>` : html`
     <div class="kvs"><div class="kv"><span>GSTIN</span><b>${p.gstin ?? '–'}</b></div><div class="kv"><span>PAN</span><b>${p.pan ?? '–'}</b></div><div class="kv"><span>Phone</span><b>${p.phone ?? '–'}</b></div><div class="kv"><span>Email</span><b>${p.email ?? '–'}</b></div>
@@ -175,10 +182,11 @@ export async function partiesView(role: 'vendor' | 'customer'): Promise<Raw> {
     : html`<p class="empty">Pick a ${noun} to see the details.</p>`}</div></section>`;
 }
 export const vendorsView = () => partiesView('vendor');
-export const clientsView = () => partiesView('customer');
+export const distributorsView = () => partiesView('distributor');
+export const retailersView = () => partiesView('retailer');
 
 // ───────────────────────── events ─────────────────────────
-const roleNow = (): 'vendor' | 'customer' => ((S.view as string) === 'clients' ? 'customer' : 'vendor');
+const roleNow = (): 'vendor' | 'distributor' | 'retailer' => ((S.view as string) === 'distributors' ? 'distributor' : (S.view as string) === 'retailers' ? 'retailer' : 'vendor');
 const PARTY_FIELDS = (p: string) => ({ name: val(p + 'name') || undefined, gstin: val(p + 'gstin'), pan: val(p + 'pan'), city: val(p + 'city'), state: val(p + 'state'), phone: val(p + 'phone'), email: val(p + 'email') });
 
 export async function onClick(t: HTMLElement): Promise<boolean> {
@@ -242,12 +250,12 @@ export async function onSubmit(form: string, f?: HTMLElement, ev?: SubmitEvent):
     case 'newunit': { const r = await act('Unit added', (c) => admin.createUnit(c, { code: val('un-code').toUpperCase(), name: val('un-name'), precision: Number(val('un-prec')) })); if (r) await R.render(); return true; }
     case 'newparty': {
       const role = roleNow();
-      const r = await act(`${role === 'vendor' ? 'Vendor' : 'Client'} saved as a draft`, (c) => md.createParty(c, { ...PARTY_FIELDS('np-'), name: val('np-name'), role, paymentDays: val('np-days') ? Number(val('np-days')) : undefined, bankAccount: val('np-bank') || undefined, contact: val('np-cname') ? { name: val('np-cname'), phone: val('np-cphone') || undefined } : undefined, ...(val('nb-line') ? { billing: readAddr('nb-'), shippingSameAsBilling: (document.getElementById('ns-same') as HTMLInputElement).checked, shipping: (document.getElementById('ns-same') as HTMLInputElement).checked ? undefined : (val('ns-line') ? readAddr('ns-') : undefined) } : {}) }));
+      const r = await act(`${role === 'vendor' ? 'Vendor' : role === 'distributor' ? 'Distributor' : 'Retailer'} saved as a draft`, (c) => md.createParty(c, { ...PARTY_FIELDS('np-'), name: val('np-name'), role: role === 'vendor' ? 'vendor' : 'customer', customerType: role === 'vendor' ? undefined : role, paymentDays: val('np-days') ? Number(val('np-days')) : undefined, bankAccount: val('np-bank') || undefined, contact: val('np-cname') ? { name: val('np-cname'), phone: val('np-cphone') || undefined } : undefined, ...(val('nb-line') ? { billing: readAddr('nb-'), shippingSameAsBilling: (document.getElementById('ns-same') as HTMLInputElement).checked, shipping: (document.getElementById('ns-same') as HTMLInputElement).checked ? undefined : (val('ns-line') ? readAddr('ns-') : undefined) } : {}) }));
       if (r) { open.delete('newparty'); st.sel[role] = r.id; await R.render(); } return true;
     }
     case 'editparty': {
       const v = await verOf('partner', sel());
-      const r = await act('Saved', (c) => md.updateParty(c, { partnerId: sel(), expectedVersion: v, ...PARTY_FIELDS('ep-'), paymentDays: val('ep-days') ? Number(val('ep-days')) : null, notes: val('ep-notes'), bankAccount: val('ep-bank') }));
+      const r = await act('Saved', (c) => md.updateParty(c, { partnerId: sel(), expectedVersion: v, ...PARTY_FIELDS('ep-'), paymentDays: val('ep-days') ? Number(val('ep-days')) : null, notes: val('ep-notes'), bankAccount: val('ep-bank'), customerType: (val('ep-type') || undefined) as 'distributor' | 'retailer' | undefined }));
       if (r) { open.delete('editparty'); if ((r as { sentBack?: boolean }).sentBack) toast('Sent back for checking because the GSTIN or bank account changed'); await R.render(); } return true;
     }
     case 'p-suspend': { const v = await verOf('partner', sel()); const r = await act('Suspended. No new orders can be raised', (c) => md.suspendParty(c, { partnerId: sel(), expectedVersion: v, reason: val('p-reason') })); if (r) { open.delete('suspend'); await R.render(); } return true; }

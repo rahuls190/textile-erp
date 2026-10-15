@@ -289,3 +289,6 @@ export async function onChange(t: HTMLInputElement): Promise<boolean> {
   if (t.dataset.bm === 'sec') { syncLines(); const i = Number(t.id.split('-')[1]); if (st.ed) st.ed.lines[i].itemId = ''; await R.render(); return true; }
   return false;
 }
+
+/** Used by the SKUs list to open a style on this screen. */
+export function gotoStyle(id: string) { st.styleId = id; st.bomId = ''; st.tab = 'styles'; st.pickCells.clear(); st.ed = null; st.planRes = null; st.plan = {}; }

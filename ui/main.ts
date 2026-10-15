@@ -24,6 +24,7 @@ import * as PF from './po-form.js';
 import * as SL from './views-sales.js';
 import * as MX from './views-masters.js';
 import * as BM from './views-bom.js';
+import * as BK from './views-bulk.js';
 import * as AI from './views-ai.js';
 import * as AG from './agent-ui.js';
 import * as P0 from '../src/domain/reports.js';
@@ -42,10 +43,13 @@ const GROUPS: { title: string; key: 'control' | 'reports' | 'sales' | 'masters' 
     { id: 'quotes', label: 'Quotations', hint: 'Prices offered' },
     { id: 'sales', label: 'Sales orders', hint: 'Orders, stock, dispatch' } ] },
   { title: 'Masters', key: 'masters', items: [
-    { id: 'materials', label: 'Materials', hint: 'Everything bought, made or sold' },
-    { id: 'mtypes', label: 'Material types', hint: 'What each kind must record, units' },
     { id: 'vendors', label: 'Vendors', hint: 'Who you buy from' },
-    { id: 'clients', label: 'Clients', hint: 'Who you sell to' } ] },
+    { id: 'distributors', label: 'Distributors', hint: 'Who buys in volume and resells' },
+    { id: 'retailers', label: 'Retailers', hint: 'Who sells to the end customer' },
+    { id: 'skus', label: 'SKUs', hint: 'Every size and colour of every style' },
+    { id: 'materials', label: 'Materials', hint: 'Everything bought or made for production' },
+    { id: 'finished', label: 'Finished goods', hint: 'What you sell' },
+    { id: 'mtypes', label: 'Material types', hint: 'What each kind must record, units' } ] },
   { title: 'Products', key: 'products', items: [
     { id: 'products', label: 'Styles, SKUs & BOM', hint: 'Sizes, colours, bills of materials, packs' } ] },
   { title: 'Operations', key: 'ops', items: [
@@ -267,7 +271,7 @@ const DEMO_NOTE = 'Demo data lives only in this browser. Every account uses the 
 
 function shell(content: Raw): string {
   const me = PEOPLE[S.user] ?? { name: S.user, role: '' };
-  const items = (g: (typeof GROUPS)[number]) => g.items.filter((n) => (g.key === 'control' ? (n.id === 'owner' ? vis.owner : vis.esc) : g.key === 'masters' ? (n.id === 'vendors' ? vis.ven : n.id === 'clients' ? vis.cli : vis.mat) : g.key === 'sales' ? (n.id === 'crm' ? vis.crm : n.id === 'quotes' ? vis.quotes : vis.sord) : g.key === 'admin' ? (n.id === 'aimodels' ? vis.ai : n.id === 'roles' || (n.id === 'audit' ? vis.audit : vis.users)) : true));
+  const items = (g: (typeof GROUPS)[number]) => g.items.filter((n) => (g.key === 'control' ? (n.id === 'owner' ? vis.owner : vis.esc) : g.key === 'masters' ? (n.id === 'vendors' ? vis.ven : n.id === 'distributors' || n.id === 'retailers' ? vis.cli : n.id === 'skus' ? vis.prod : vis.mat) : g.key === 'sales' ? (n.id === 'crm' ? vis.crm : n.id === 'quotes' ? vis.quotes : vis.sord) : g.key === 'admin' ? (n.id === 'aimodels' ? vis.ai : n.id === 'roles' || (n.id === 'audit' ? vis.audit : vis.users)) : true));
   return html`
   <aside class="sidebar">
     <div class="brand"><img class="brand-logo" src="kalyani-logo.png" alt="Kalyani" /><span class="erp-label">Operations ERP · demo</span></div>
@@ -333,7 +337,7 @@ async function computeVis() {
 const VIEWS: Record<View, () => Promise<Raw>> = {
   overview, po: poView, receiving: receivingView, quality: qualityView, stock: stockView, audit: auditView,
   employees: H.employeesView, attendance: H.attendanceView, leave: H.leaveView, payroll: H.payrollView,
-  owner: O.ownerView, escalations: O.escalationsView, reports: P.reportsView, barcodes: B.barcodesView, crm: SL.crmView, quotes: SL.quotesView, sales: SL.salesView, materials: MX.materialsView, mtypes: MX.typesView, vendors: MX.vendorsView, clients: MX.clientsView, products: BM.productsView, aimodels: AI.aiView, users: A.usersView, roles: A.rolesView, signins: A.signinsView, account: A.accountView,
+  owner: O.ownerView, escalations: O.escalationsView, reports: P.reportsView, barcodes: B.barcodesView, crm: SL.crmView, quotes: SL.quotesView, sales: SL.salesView, materials: MX.materialsView, mtypes: MX.typesView, vendors: MX.vendorsView, distributors: MX.distributorsView, retailers: MX.retailersView, finished: MX.finishedView, skus: BK.skusView, clients: MX.retailersView, products: BM.productsView, aimodels: AI.aiView, users: A.usersView, roles: A.rolesView, signins: A.signinsView, account: A.accountView,
 };
 
 let queued = false;
@@ -396,6 +400,7 @@ document.addEventListener('click', async (ev) => {
   if (await SL.onClick(t)) return;
   if (await MX.onClick(t)) return;
   if (await BM.onClick(t)) return;
+  if (await BK.onClick(t)) return;
   if (await AI.onClick(t)) return;
   if (await PF.onClick(t, async () => (await read((db) => db.query(`SELECT id, code, name, stock_unit FROM item WHERE status='active' ORDER BY code`))).rows as never)) return;
   const pp = t.closest('[data-pick-po]') as HTMLElement | null; if (pp) { S.poId = pp.dataset.pickPo!; return render(); }
@@ -447,6 +452,7 @@ document.addEventListener('submit', async (ev) => {
   if (await B.onSubmit(f.dataset.form!, ev)) return;
   if (await SL.onSubmit(f.dataset.form!, f)) return;
   if (await BM.onSubmit(f.dataset.form!, f)) return;
+  if (await BK.onSubmit(f.dataset.form!, f, ev as SubmitEvent)) return;
   if (await MX.onSubmit(f.dataset.form!, f, ev as SubmitEvent)) return;
   if (await AI.onSubmit(f.dataset.form!, f)) return;
   switch (f.dataset.form) {
@@ -479,6 +485,7 @@ document.addEventListener('change', async (ev) => {
   }
   if (await MX.onChange(t)) return;
   if (await BM.onChange(t)) return;
+  if (await BK.onChange(t)) return;
   if (await AI.onChange(t)) return;
   if (t.dataset.perm) return A.togglePerm(t.dataset.perm);
   if (t.id === 'att-date' && t.value) { S.attDate = t.value; return render(); }
@@ -487,6 +494,7 @@ document.addEventListener('change', async (ev) => {
 document.addEventListener('input', async (ev) => {
   const t = ev.target as HTMLInputElement;
   if (await MX.onInput(t)) return;
+  if (await BK.onInput(t)) return;
   if (t.id === 'filter') { S.filter = t.value; render(); }
 });
 document.addEventListener('keydown', (ev) => { if (ev.key === 'Enter') { const r = (ev.target as HTMLElement).closest('tr.pick') as HTMLElement | null; if (r) r.click(); } });
