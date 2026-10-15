@@ -1,5 +1,6 @@
 import type { World } from './demo.js';
 import * as plan from '../domain/planning.js';
+import * as prod from '../domain/production.js';
 
 /** A planner, expected sales for the demo style, a cutting yield, and rib fabric made from grey fabric. Then the first purchase requests. */
 export async function seedPlanningDemo(w: World) {
@@ -12,4 +13,11 @@ export async function seedPlanningDemo(w: World) {
   const rib = (await w.pool.query(`SELECT id FROM item WHERE name LIKE 'Rib knit 220%'`)).rows[0].id;
   await w.as('pln', (c) => plan.setItemPlan(c, { itemId: rib, greyItemId: w.items.fabric, finishLossPct: '8', leadDays: 14 }));
   await w.as('pln', (c) => plan.generateRequests(c, { withinDays: 45 }));
+  // A finishing order waiting to be sent out, so the Work orders screen has something to show.
+  const plid = w.actors.pln.id;
+  const lots = (await prod.freeFabricLots(w.pool, plid)).filter((l: { item_id: string }) => l.item_id === w.items.fabric);
+  if (lots.length) {
+    const lot = lots.sort((a: { free: number }, b: { free: number }) => b.free - a.free)[0];
+    await w.as('pln', (c) => prod.createFinishOrder(c, { lotId: lot.id, qty: String(Math.min(lot.free, 120)), outItemId: rib, finishName: 'Dyed black', colour: 'BLK', notes: 'Demo order' }));
+  }
 }

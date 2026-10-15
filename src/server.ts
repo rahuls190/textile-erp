@@ -14,6 +14,7 @@ import * as bcs from './domain/barcodes.js';
 import * as bom from './domain/bom.js';
 import * as bulk from './domain/bulk.js';
 import * as plan from './domain/planning.js';
+import * as prod from './domain/production.js';
 import * as sales from './domain/sales.js';
 import * as prefs from './domain/prefs.js';
 import * as admin from './domain/admin.js';
@@ -290,6 +291,17 @@ export async function buildServer(pool: Pool): Promise<FastifyInstance> {
   cmd('/api/plan/requests/generate', 'request.create', z.object({ withinDays: z.number().int().optional() }), (c, b) => plan.generateRequests(c, b), true);
   cmd('/api/plan/requests/:id/convert', 'request.convert', z.object({ expectedVersion: ver, partnerId: id.optional() }), (c, b, p) => plan.convertRequest(c, { requestId: p.id, ...b }), true);
   cmd('/api/plan/requests/:id/cancel', 'request.cancel', z.object({ expectedVersion: ver, reason: z.string().min(3) }), (c, b, p) => plan.cancelRequest(c, { requestId: p.id, ...b }));
+  app.get('/api/work-orders', read((db, a) => prod.listWorkOrders(db, a.id)));
+  app.get('/api/work-orders/fabric-lots', read((db, a) => prod.freeFabricLots(db, a.id)));
+  app.get('/api/work-orders/:id/needs', read((db, _a, req) => prod.cutNeeds(db, (req.params as { id: string }).id)));
+  cmd('/api/work-orders/finish', 'wo.finish', z.object({ lotId: id, qty: z.string(), outItemId: id, processorId: id.nullish(), finishName: z.string(), colour: z.string().optional(), notes: z.string().optional() }), (c, b) => prod.createFinishOrder(c, b), true);
+  cmd('/api/work-orders/cut', 'wo.cut', z.object({ siteId: id, styleId: id, lines: z.array(z.object({ skuId: id, qty: z.number().int() })), notes: z.string().optional() }), (c, b) => prod.createCutOrder(c, b), true);
+  cmd('/api/work-orders/:id/issue-finish', 'wo.issue', z.object({ expectedVersion: ver }), (c, b, p) => prod.issueFinish(c, { woId: p.id, ...b }));
+  cmd('/api/work-orders/:id/receive-finish', 'wo.receive', z.object({ expectedVersion: ver, qty: z.string() }), (c, b, p) => prod.receiveFinish(c, { woId: p.id, ...b }));
+  cmd('/api/work-orders/:id/issue-cut', 'wo.issuecut', z.object({ expectedVersion: ver }), (c, b, p) => prod.issueCut(c, { woId: p.id, ...b }));
+  cmd('/api/work-orders/:id/complete-cut', 'wo.complete', z.object({ expectedVersion: ver, actual: z.array(z.object({ skuId: id, qty: z.number().int() })) }), (c, b, p) => prod.completeCut(c, { woId: p.id, ...b }));
+  cmd('/api/work-orders/:id/cancel', 'wo.cancel', z.object({ expectedVersion: ver, reason: z.string().min(3) }), (c, b, p) => prod.cancelWorkOrder(c, { woId: p.id, ...b }));
+  cmd('/api/lots/:id/split', 'lot.split', z.object({ parts: z.array(z.object({ qty: z.string(), shade: z.string(), colour: z.string().optional() })) }), (c, b, p) => prod.splitLot(c, { lotId: p.id, ...b }));
 
   // ── purchase orders ──
   const poLine = z.object({ itemId: id, qty: pos, rate: pos.optional(), dueDate: date.nullish() });

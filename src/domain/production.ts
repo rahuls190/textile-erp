@@ -260,7 +260,7 @@ export async function listWorkOrders(db: Db, userId: string) {
   const sites = await visibleSites(db, userId, 'production.view');
   if (sites && !sites.length) return [];
   return (await db.query(
-    `SELECT w.id, w.number, w.kind, w.status, w.version, w.finish_name, w.colour, w.notes, w.created_at, w.completed_at, w.cancel_reason, s.code AS style, s.name AS style_name, pr.name AS processor, oi.code AS out_code, u.display_name AS creator,
+    `SELECT w.id, w.number, w.kind, w.status, w.version, w.finish_name, w.colour, w.notes, w.created_at::date::text AS created_at, w.completed_at::date::text AS completed_at, w.cancel_reason, s.code AS style, s.name AS style_name, pr.name AS processor, oi.code AS out_code, u.display_name AS creator,
             COALESCE((SELECT json_agg(json_build_object('id', l.id, 'role', l.role, 'code', COALESCE(k.code, i.code), 'name', i.name, 'lot', lt.label, 'planned', l.planned_qty::float, 'actual', l.actual_qty::float, 'unit', l.unit, 'sku_id', l.sku_id) ORDER BY l.line_no)
                       FROM work_order_line l JOIN item i ON i.id=l.item_id LEFT JOIN sku k ON k.id=l.sku_id LEFT JOIN lot lt ON lt.id=l.lot_id WHERE l.wo_id=w.id), '[]') AS lines
        FROM work_order w LEFT JOIN product_style s ON s.id=w.style_id LEFT JOIN partner pr ON pr.id=w.processor_id LEFT JOIN item oi ON oi.id=w.out_item_id LEFT JOIN app_user u ON u.id=w.created_by
