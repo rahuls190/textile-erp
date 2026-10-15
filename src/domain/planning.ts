@@ -40,8 +40,17 @@ export async function computePlan(db: Db, userId: string) {
     `SELECT l.item_id, sum(l.qty)::text AS q FROM so_line l JOIN sales_order s ON s.id=l.so_id
       WHERE s.status IN ('confirmed','part_dispatched','dispatched') AND s.created_at >= now() - make_interval(months => $1) GROUP BY 1`, [set.sales_months])).rows.map((r) => [r.item_id as string, n(r.q) / set.sales_months]));
   const demandOverride = new Map<string, number>((await db.query('SELECT item_id, month::text AS month, qty::text AS qty FROM plan_demand')).rows.map((r) => [`${r.item_id}|${r.month}`, n(r.qty)]));
+  // Confirmed orders not yet dispatched are firm demand in the month they are due.
+  const orderDemand = new Map<string, number>((await db.query(
+    `SELECT l.item_id, COALESCE(s.due_date, CURRENT_DATE)::text AS due, sum(l.qty - l.dispatched_qty)::text AS q FROM so_line l JOIN sales_order s ON s.id=l.so_id
+      WHERE s.status IN ('confirmed','part_dispatched') AND l.qty > l.dispatched_qty GROUP BY 1, 2`)).rows.map((r) => [`${r.item_id}|${monthStart(r.due < today ? today : r.due)}`, n(r.q)]));
   const onHand = new Map<string, number>((await db.query(
     `SELECT sl.item_id, sum(sl.qty)::text AS q FROM stock_ledger sl WHERE sl.status='ACCEPTED' AND ($1::uuid[] IS NULL OR sl.site_id = ANY($1::uuid[])) GROUP BY 1`, [sites])).rows.map((r) => [r.item_id as string, n(r.q)]));
+
+  // Pieces already cut and waiting for QC, and pieces on open cutting orders, are on their way: count them as stock so the plan does not ask for them twice.
+  const bump0 = (id: string, q: number) => onHand.set(id, (onHand.get(id) ?? 0) + q);
+  for (const r of (await db.query(`SELECT sl.item_id, sum(sl.qty)::text AS q FROM stock_ledger sl JOIN item i ON i.id=sl.item_id WHERE sl.status='HOLD' AND i.kind='FG' AND ($1::uuid[] IS NULL OR sl.site_id = ANY($1::uuid[])) GROUP BY 1 HAVING sum(sl.qty) > 0`, [sites])).rows) bump0(r.item_id, n(r.q));
+  for (const r of (await db.query(`SELECT l.item_id, sum(l.planned_qty)::text AS q FROM work_order_line l JOIN work_order w ON w.id=l.wo_id WHERE w.kind='cut' AND w.status IN ('draft','issued') AND l.role='sku' AND ($1::uuid[] IS NULL OR w.site_id = ANY($1::uuid[])) GROUP BY 1`, [sites])).rows) bump0(r.item_id, n(r.q));
 
   // ── finished pieces: how many to make each month ──
   const skuRows = (await db.query(
@@ -58,7 +67,7 @@ export async function computePlan(db: Db, userId: string) {
     const min = r4(Math.max(n(ip.manual_min), (avg * cover) / 30));
     let open = onHand.get(k.item_id) ?? 0; const hand = open;
     const rows: PlanRow[] = months.map((m, mi) => {
-      const demand = demandOverride.get(`${k.item_id}|${m}`) ?? avg;
+      const demand = demandOverride.get(`${k.item_id}|${m}`) ?? Math.max(avg, orderDemand.get(`${k.item_id}|${m}`) ?? 0);
       const production = Math.ceil(Math.max(0, demand + min - open) - 1e-9);
       const closing = open + production - demand;
       const row = { month: m, demand: r4(demand), opening: r4(open), production, closing: r4(closing) }; open = closing;
@@ -75,7 +84,9 @@ export async function computePlan(db: Db, userId: string) {
   const arriving = new Map<string, number[]>(); const addArr = (id: string, m: number, q: number) => { const a = arriving.get(id) ?? Array(months.length).fill(0); a[m] += q; arriving.set(id, a); };
   for (const r of (await db.query(
     `SELECT pl.item_id, COALESCE(pl.due_date, CURRENT_DATE)::text AS due, (pl.qty - pl.received_qty)::text AS rem FROM po_line pl JOIN purchase_order p ON p.id=pl.po_id
-      WHERE p.status IN ('approved','released','acknowledged','partial_receipt') AND pl.qty > pl.received_qty AND ($1::uuid[] IS NULL OR p.site_id = ANY($1::uuid[]))`, [sites])).rows) addArr(r.item_id, mIdx(r.due), n(r.rem));
+      WHERE p.status IN ('draft','approval_pending','approved','released','acknowledged','partial_receipt') AND pl.qty > pl.received_qty AND ($1::uuid[] IS NULL OR p.site_id = ANY($1::uuid[]))`, [sites])).rows) addArr(r.item_id, mIdx(r.due), n(r.rem));
+  // Goods that have arrived but are still waiting for the quality check will be usable soon: count them as arriving this month.
+  for (const r of (await db.query(`SELECT sl.item_id, sum(sl.qty)::text AS q FROM stock_ledger sl WHERE sl.status='HOLD' AND ($1::uuid[] IS NULL OR sl.site_id = ANY($1::uuid[])) GROUP BY 1 HAVING sum(sl.qty) > 0`, [sites])).rows) addArr(r.item_id, 0, n(r.q));
   const prQty = new Map<string, number>();
   for (const r of (await db.query(`SELECT l.item_id, l.needed_by::text AS nb, l.qty::text AS qty FROM purchase_request_line l JOIN purchase_request p ON p.id=l.pr_id WHERE p.status='open'`)).rows) { addArr(r.item_id, mIdx(r.nb), n(r.qty)); prQty.set(r.item_id, (prQty.get(r.item_id) ?? 0) + n(r.qty)); }
 

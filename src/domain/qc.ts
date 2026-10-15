@@ -9,8 +9,8 @@ import { refreshPoStatus } from './po.js';
 
 async function loadInspection(db: Db, id: string, expectedVersion?: number) {
   const q = (await db.query(
-    `SELECT q.*, rl.qty AS lot_qty, rl.po_line_id, rl.item_id, rl.unit
-       FROM qc_inspection q JOIN receipt_line rl ON rl.id = q.receipt_line_id WHERE q.id=$1 FOR UPDATE OF q`, [id])).rows[0];
+    `SELECT q.*, COALESCE(rl.qty, q.source_qty) AS lot_qty, rl.po_line_id, COALESCE(rl.item_id, q.source_item_id) AS item_id, COALESCE(rl.unit, q.source_unit) AS unit
+       FROM qc_inspection q LEFT JOIN receipt_line rl ON rl.id = q.receipt_line_id WHERE q.id=$1 FOR UPDATE OF q`, [id])).rows[0];
   if (!q) throw notFound('Inspection');
   if (expectedVersion !== undefined && q.version !== expectedVersion) throw staleVersion(expectedVersion, q.version);
   return q;
@@ -92,8 +92,8 @@ export async function listInspections(db: Db, userId: string, f: { status?: stri
   const sites = await visibleSites(db, userId, 'qc.view');
   if (sites && !sites.length) return [];
   return (await db.query(
-    `SELECT q.id, q.status, q.version, q.site_id, l.label, rl.qty, rl.unit, q.accepted_qty, q.rejected_qty, i.code AS item_code
-       FROM qc_inspection q JOIN receipt_line rl ON rl.id = q.receipt_line_id JOIN lot l ON l.id = q.lot_id JOIN item i ON i.id = rl.item_id
+    `SELECT q.id, q.status, q.version, q.site_id, l.label, COALESCE(rl.qty, q.source_qty) AS qty, COALESCE(rl.unit, q.source_unit) AS unit, q.accepted_qty, q.rejected_qty, i.code AS item_code
+       FROM qc_inspection q LEFT JOIN receipt_line rl ON rl.id = q.receipt_line_id JOIN lot l ON l.id = q.lot_id JOIN item i ON i.id = COALESCE(rl.item_id, q.source_item_id)
       WHERE ($1::uuid[] IS NULL OR q.site_id = ANY($1::uuid[])) AND ($2::text IS NULL OR q.status = $2)
       ORDER BY q.created_at DESC LIMIT 200`, [sites, f.status ?? null])).rows;
 }

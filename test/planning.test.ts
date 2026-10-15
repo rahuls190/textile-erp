@@ -69,8 +69,8 @@ describe('materials and requests', () => {
   it('turns pieces into material need, with the BOM size quantities, wastage and cutting yield', async () => {
     const a = mat(await plan.computePlan(w.pool, uid('pln')), rib);
     const perPiece = 0.21 * 1.06;                              // size M quantity with 6% wastage
-    const wht = 0.24 * 1.06;                                   // size L
-    expect(a.rows.reduce((s, r) => s + r.need, 0)).toBeCloseTo(2100 * perPiece + (600 + 300 * 5) * wht, 1);
+    const wht = 0.24 * 1.06;                                   // size L; the confirmed order for 900 pieces is firm demand in its month
+    expect(a.rows.reduce((s, r) => s + r.need, 0)).toBeCloseTo(2100 * perPiece + (1200 + 300 * 5) * wht, 1);
     await w.as('pln', (c) => plan.setCuttingYield(c, { styleId, yieldPct: 80 }));
     const b = mat(await plan.computePlan(w.pool, uid('pln')), rib);
     expect(b.rows.reduce((s, r) => s + r.need, 0)).toBeCloseTo(a.rows.reduce((s, r) => s + r.need, 0) / 0.8, 0);
